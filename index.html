@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ComplianceHub — Legal Requirement Management</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --primary: #1a3a5c;
+    --primary-light: #e8f0f9;
+    --primary-mid: #2d6aa8;
+    --accent: #e84c2b;
+    --accent-light: #fdf0ed;
+    --success: #1a7a4a;
+    --success-light: #e8f5ee;
+    --warning: #b85c00;
+    --warning-light: #fdf3e7;
+    --danger: #c0392b;
+    --danger-light: #fdecea;
+    --neutral: #f5f4f1;
+    --border: rgba(26,58,92,0.12);
+    --border-strong: rgba(26,58,92,0.25);
+    --text: #1a1a2e;
+    --text-mid: #4a5568;
+    --text-light: #8492a6;
+    --bg: #f7f6f3;
+    --card: #ffffff;
+    --sidebar-w: 240px;
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+
+  /* ── LAYOUT ── */
+  .app { display: flex; height: 100vh; overflow: hidden; }
+  .sidebar { width: var(--sidebar-w); background: var(--primary); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+  .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  .topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .content { padding: 24px; flex: 1; }
+
+  /* ── SIDEBAR ── */
+  .logo { padding: 20px 18px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .logo-text { font-size: 16px; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
+  .logo-sub { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; font-family: var(--mono); }
+  .nav-section { padding: 12px 0; }
+  .nav-label { font-size: 10px; font-weight: 600; letter-spacing: 0.8px; color: rgba(255,255,255,0.3); padding: 6px 18px; text-transform: uppercase; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 18px; cursor: pointer; color: rgba(255,255,255,0.6); font-size: 13px; font-weight: 400; transition: all 0.15s; border-left: 3px solid transparent; }
+  .nav-item:hover { color: #fff; background: rgba(255,255,255,0.06); }
+  .nav-item.active { color: #fff; background: rgba(255,255,255,0.1); border-left-color: #5ba4e5; }
+  .nav-icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.8; }
+  .nav-badge { margin-left: auto; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; }
+  .sidebar-bottom { margin-top: auto; padding: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
+  .user-pill { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: rgba(255,255,255,0.07); border-radius: 8px; cursor: pointer; }
+  .user-avatar { width: 30px; height: 30px; border-radius: 50%; background: #5ba4e5; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; flex-shrink: 0; }
+  .user-name { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.85); }
+  .user-role { font-size: 10px; color: rgba(255,255,255,0.4); }
+
+  /* ── TOPBAR ── */
+  .topbar-title { font-size: 15px; font-weight: 500; color: var(--text); }
+  .topbar-actions { display: flex; align-items: center; gap: 10px; }
+  .view-toggle { display: flex; background: var(--neutral); border-radius: 6px; padding: 3px; gap: 2px; }
+  .view-btn { padding: 5px 12px; border-radius: 4px; border: none; background: none; font-size: 12px; font-weight: 500; color: var(--text-mid); cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+  .view-btn.active { background: var(--card); color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 7px; border: none; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-mid); }
+  .btn-ghost { background: none; border: 1px solid var(--border-strong); color: var(--text-mid); }
+  .btn-ghost:hover { background: var(--neutral); }
+  .btn-danger { background: var(--danger-light); color: var(--danger); border: 1px solid rgba(192,57,43,0.2); }
+  .btn-success { background: var(--success-light); color: var(--success); border: 1px solid rgba(26,122,74,0.2); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ── CARDS ── */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .card-sub { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+
+  /* ── STATS GRID ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .stat-label { font-size: 11px; color: var(--text-light); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .stat-value { font-size: 28px; font-weight: 300; color: var(--text); letter-spacing: -1px; font-family: var(--mono); }
+  .stat-sub { font-size: 11px; color: var(--text-light); margin-top: 4px; }
+  .stat-bar { height: 3px; background: var(--neutral); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+  .stat-fill { height: 100%; border-radius: 2px; }
+
+  /* ── GRIDS ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+
+  /* ── TABLE ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: var(--neutral); }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:hover { background: var(--neutral); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ── BADGES ── */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 100px; font-size: 11px; font-weight: 500; }
+  .badge-open { background: var(--primary-light); color: var(--primary); }
+  .badge-pending { background: var(--warning-light); color: var(--warning); }
+  .badge-complied { background: var(--success-light); color: var(--success); }
+  .badge-overdue { background: var(--danger-light); color: var(--danger); }
+  .badge-escalated { background: #f3e8ff; color: #6b21a8; }
+  .badge-high { background: var(--danger-light); color: var(--danger); }
+  .badge-medium { background: var(--warning-light); color: var(--warning); }
+  .badge-low { background: var(--success-light); color: var(--success); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+  /* ── TAGS ── */
+  .tag { display: inline-block; padding: 2px 7px; background: var(--neutral); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; color: var(--text-mid); font-family: var(--mono); }
+
+  /* ── FORMS ── */
+  .form-group { margin-bottom: 14px; }
+  label { display: block; font-size: 12px; font-weight: 500; color: var(--text-mid); margin-bottom: 5px; }
+  input, select, textarea { width: 100%; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 7px; font-family: var(--font); font-size: 13px; color: var(--text); background: var(--card); outline: none; transition: border 0.15s; }
+  input:focus, select:focus, textarea:focus { border-color: var(--primary-mid); box-shadow: 0 0 0 3px rgba(45,106,168,0.1); }
+  textarea { resize: vertical; min-height: 80px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+
+  /* ── MODAL ── */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15,25,50,0.5); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--card); border-radius: 12px; padding: 24px; width: 600px; max-width: 94vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.18); }
+  .modal-lg { width: 760px; }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close { width: 28px; height: 28px; border: none; background: var(--neutral); border-radius: 6px; cursor: pointer; font-size: 16px; color: var(--text-mid); display: flex; align-items: center; justify-content: center; }
+
+  /* ── TABS ── */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab { padding: 9px 16px; font-size: 13px; font-weight: 500; color: var(--text-light); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary-mid); }
+
+  /* ── DONUT CHART ── */
+  .chart-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto; }
+  .chart-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .chart-pct { font-size: 22px; font-weight: 300; font-family: var(--mono); }
+  .chart-lbl { font-size: 10px; color: var(--text-light); }
+  .legend { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .legend-label { color: var(--text-mid); flex: 1; }
+  .legend-val { font-family: var(--mono); font-weight: 500; color: var(--text); }
+
+  /* ── PROGRESS ── */
+  .progress { height: 6px; background: var(--neutral); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+
+  /* ── PLANT GRID ── */
+  .plant-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; cursor: pointer; transition: all 0.15s; }
+  .plant-card:hover { border-color: var(--primary-mid); box-shadow: 0 4px 12px rgba(26,58,92,0.08); }
+  .plant-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .plant-state { font-size: 11px; color: var(--text-light); margin-bottom: 10px; }
+  .plant-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .plant-stat { text-align: center; }
+  .plant-stat-val { font-size: 16px; font-weight: 500; font-family: var(--mono); }
+  .plant-stat-label { font-size: 10px; color: var(--text-light); }
+
+  /* ── ACTIVITY FEED ── */
+  .activity-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 14px; }
+  .activity-body { flex: 1; }
+  .activity-text { font-size: 13px; color: var(--text); }
+  .activity-time { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+
+  /* ── USER DASHBOARD ── */
+  .task-item { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .task-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .task-title { font-size: 14px; font-weight: 500; }
+  .task-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-light); }
+  .task-meta span { display: flex; align-items: center; gap: 4px; }
+  .task-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .upload-zone { border: 2px dashed var(--border-strong); border-radius: 8px; padding: 16px; text-align: center; color: var(--text-light); font-size: 12px; cursor: pointer; margin-top: 8px; }
+  .upload-zone:hover { border-color: var(--primary-mid); color: var(--primary-mid); }
+  .reply-box { background: var(--neutral); border-radius: 8px; padding: 12px; margin-top: 8px; }
+
+  /* ── ESCALATION ── */
+  .escalation-level { display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+  .level-badge { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  .level-1 { background: var(--warning-light); color: var(--warning); }
+  .level-2 { background: var(--danger-light); color: var(--danger); }
+  .level-3 { background: #f3e8ff; color: #6b21a8; }
+  .level-info { flex: 1; }
+  .level-name { font-size: 13px; font-weight: 500; }
+  .level-desc { font-size: 11px; color: var(--text-light); }
+
+  /* ── REMINDER ── */
+  .reminder-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+  .reminder-freq { font-family: var(--mono); font-size: 12px; color: var(--primary-mid); background: var(--primary-light); padding: 2px 8px; border-radius: 4px; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+  /* ── VIEW PANELS ── */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── SEARCH ── */
+  .search-wrap { position: relative; }
+  .search-wrap input { padding-left: 32px; width: 220px; }
+  .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-light); font-size: 14px; }
+
+  /* ── TOOLTIP ── */
+  .info-tooltip { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: var(--neutral); border: 1px solid var(--border-strong); border-radius: 50%; font-size: 10px; color: var(--text-light); cursor: help; }
+
+  /* ── FILTERS ── */
+  .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar select { width: auto; padding: 6px 10px; font-size: 12px; }
+  .filter-bar input[type=text] { width: 180px; padding: 6px 10px; font-size: 12px; }
+
+  /* RESPONSIVE */
+  @media (max-width: 900px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── SIDEBAR ── -->
+  <div class="sidebar" id="sidebar">
+    <div class="logo">
+      <div class="logo-text">ComplianceHub</div>
+      <div class="logo-sub">Legal Req. Management</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label" id="roleLabel">Admin Panel</div>
+      <div class="nav-item active" onclick="showPanel('dashboard')">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" onclick="showPanel('requirements')" id="navReq">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        Requirements
+        <span class="nav-badge" id="navBadge">5</span>
+      </div>
+      <div class="nav-item" onclick="showPanel('plants')" id="navPlants">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+        Plants
+      </div>
+      <div class="nav-item" onclick="showPanel('users')" id="navUsers">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197"/></svg>
+        Users & Groups
+      </div>
+      <div class="nav-item" onclick="showPanel('reminders')" id="navReminders">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+        Reminders
+      </div>
+      <div class="nav-item" onclick="showPanel('escalation')" id="navEsc">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+        Escalations
+      </div>
+      <div class="nav-item" onclick="showPanel('reports')" id="navReports">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        Reports
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="view-toggle" style="margin-bottom:10px;">
+        <button class="view-btn active" onclick="switchRole('admin')" id="btnAdmin">Admin</button>
+        <button class="view-btn" onclick="switchRole('plant')" id="btnPlant">Plant</button>
+        <button class="view-btn" onclick="switchRole('user')" id="btnUser">User</button>
+      </div>
+      <div class="user-pill">
+        <div class="user-avatar" id="avatarEl">RA</div>
+        <div>
+          <div class="user-name" id="userName">Rajesh Agarwal</div>
+          <div class="user-role" id="userRole">Group Admin</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <div class="topbar-title" id="topbarTitle">Group Dashboard</div>
+        <span class="tag" id="topbarContext">All 12 Plants</span>
+      </div>
+      <div class="topbar-actions">
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input type="text" placeholder="Search requirements..." id="searchInput">
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openModal('modalAddReq')" id="btnAddReq">+ Add Requirement</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ═══════════════════════════════════
+           PANEL: ADMIN DASHBOARD
+      ═══════════════════════════════════ -->
+      <div class="panel active" id="panel-dashboard">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Total Requirements</div>
+            <div class="stat-value">148</div>
+            <div class="stat-sub">Across all 12 plants</div>
+            <div class="stat-bar"><div class="stat-fill" style="width:100%;background:var(--primary-mid);"></div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Complied</div>
+            <div class="stat-value" style="color:var(--success)">89</div>
+            <div class="stat-sub">60.1% completion rate</div>
+            <div class="stat-bar"><div class="stat-fill" style="width:60%;background:#1a7a4a;"></div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Overdue</div>
+            <div class="stat-value" style="color:var(--danger)">23</div>
+            <div class="stat-sub">Requires immediate action</div>
+            <div class="stat-bar"><div class="stat-fill" style="width:15%;background:var(--danger);"></div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Escalated</div>
+            <div class="stat-value" style="color:#7c3aed">7</div>
+            <div class="stat-sub">To top management</div>
+            <div class="stat-bar"><div class="stat-fill" style="width:4.7%;background:#7c3aed;"></div></div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:16px;">
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Compliance Status — All Plants</div><div class="card-sub">Real-time group overview</div></div>
+            </div>
+            <canvas id="barChart" height="200"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Requirement Categories</div><div class="card-sub">Distribution by type</div></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:20px; padding-top:8px;">
+              <div class="chart-wrap">
+                <canvas id="donutChart"></canvas>
+                <div class="chart-center">
+                  <div class="chart-pct">60%</div>
+                  <div class="chart-lbl">complied</div>
+                </div>
+              </div>
+              <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#1a7a4a;"></div><span class="legend-label">Complied</span><span class="legend-val">89</span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#2d6aa8;"></div><span class="legend-label">In Progress</span><span class="legend-val">36</span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#b85c00;"></div><span class="legend-label">Pending</span><span class="legend-val">23</span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#c0392b;"></div><span class="legend-label">Overdue</span><span class="legend-val">23</span></div>
+                <div class="legend-item"><div class="legend-dot" style="background:#7c3aed;"></div><span class="legend-label">Escalated</span><span class="legend-val">7</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-3" style="margin-bottom:16px;">
+          <div class="card" style="grid-column: span 2;">
+            <div class="card-header">
+              <div><div class="card-title">Plant-wise Performance</div></div>
+              <button class="btn btn-ghost btn-sm" onclick="showPanel('plants')">View All →</button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+              <!-- Plant mini-cards -->
+              <div class="plant-card" onclick="showPanel('plants')">
+                <div class="plant-name">Panipat</div>
+                <div class="plant-state">Haryana</div>
+                <div class="progress"><div class="progress-fill" style="width:85%;background:var(--success);"></div></div>
+                <div style="font-size:11px;color:var(--text-light);margin-top:4px;">85% • 17/20 done</div>
+              </div>
+              <div class="plant-card" onclick="showPanel('plants')">
+                <div class="plant-name">Surat</div>
+                <div class="plant-state">Gujarat</div>
+                <div class="progress"><div class="progress-fill" style="width:72%;background:var(--primary-mid);"></div></div>
+                <div style="font-size:11px;color:var(--text-light);margin-top:4px;">72% • 13/18 done</div>
+              </div>
+              <div class="plant-card" onclick="showPanel('plants')">
+                <div class="plant-name">Pune</div>
+                <div class="plant-state">Maharashtra</div>
+                <div class="progress"><div class="progress-fill" style="width:55%;background:var(--warning);"></div></div>
+                <div style="font-size:11px;color:var(--text-light);margin-top:4px;">55% • 11/20 done</div>
+              </div>
+              <div class="plant-card" onclick="showPanel('plants')">
+                <div class="plant-name">Chennai</div>
+                <div class="plant-state">Tamil Nadu</div>
+                <div class="progress"><div class="progress-fill" style="width:40%;background:var(--danger);"></div></div>
+                <div style="font-size:11px;color:var(--text-light);margin-top:4px;">40% • 6/15 done</div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Recent Activity</div></div>
+            <div>
+              <div class="activity-item">
+                <div class="activity-icon" style="background:var(--success-light);">✓</div>
+                <div class="activity-body"><div class="activity-text">Pollution Control complied — <strong>Surat</strong></div><div class="activity-time">2 hrs ago</div></div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon" style="background:var(--danger-light);">!</div>
+                <div class="activity-body"><div class="activity-text">Fire NOC overdue — <strong>Chennai</strong></div><div class="activity-time">5 hrs ago</div></div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon" style="background:#f3e8ff;">↑</div>
+                <div class="activity-body"><div class="activity-text">Escalated to MD — <strong>Pune</strong></div><div class="activity-time">1 day ago</div></div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-icon" style="background:var(--primary-light);">+</div>
+                <div class="activity-body"><div class="activity-text">New req. added — <strong>Panipat</strong></div><div class="activity-time">2 days ago</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Overdue table -->
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Overdue & Critical Requirements</div><div class="card-sub">Requires immediate attention</div></div>
+            <button class="btn btn-ghost btn-sm" onclick="showPanel('requirements')">View All</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Req. ID</th><th>Requirement</th><th>Plant</th><th>Assigned To</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                <tr><td><span class="tag">REQ-042</span></td><td>Factory License Renewal</td><td>Chennai Plant</td><td>K. Ramasamy</td><td style="color:var(--danger)">Mar 15, 2025</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-overdue"><span class="dot"></span>Overdue</span></td><td><button class="btn btn-ghost btn-sm" onclick="openModal('modalView')">View</button></td></tr>
+                <tr><td><span class="tag">REQ-037</span></td><td>CGWA Water Permit</td><td>Pune Plant</td><td>S. Patil</td><td style="color:var(--danger)">Mar 20, 2025</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-escalated"><span class="dot"></span>Escalated</span></td><td><button class="btn btn-ghost btn-sm" onclick="openModal('modalView')">View</button></td></tr>
+                <tr><td><span class="tag">REQ-051</span></td><td>PCB Consent to Operate</td><td>Indore Plant</td><td>M. Sharma</td><td style="color:var(--warning)">Apr 1, 2025</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-pending"><span class="dot"></span>Pending</span></td><td><button class="btn btn-ghost btn-sm" onclick="openModal('modalView')">View</button></td></tr>
+                <tr><td><span class="tag">REQ-029</span></td><td>PESO License — Flammable</td><td>Surat Plant</td><td>A. Patel</td><td style="color:var(--warning)">Apr 5, 2025</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-open"><span class="dot"></span>Open</span></td><td><button class="btn btn-ghost btn-sm" onclick="openModal('modalView')">View</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: REQUIREMENTS
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-requirements">
+        <div class="filter-bar">
+          <select id="filterPlant"><option value="">All Plants</option><option>Panipat</option><option>Surat</option><option>Pune</option><option>Chennai</option><option>Indore</option><option>Jaipur</option><option>Lucknow</option><option>Bhopal</option><option>Ahmedabad</option><option>Nagpur</option><option>Visakhapatnam</option><option>Kochi</option></select>
+          <select id="filterStatus"><option value="">All Status</option><option>Open</option><option>Pending</option><option>Complied</option><option>Overdue</option><option>Escalated</option></select>
+          <select id="filterPriority"><option value="">All Priority</option><option>High</option><option>Medium</option><option>Low</option></select>
+          <select id="filterCategory"><option value="">All Categories</option><option>Environmental</option><option>Safety</option><option>Labor</option><option>Factory Act</option><option>Fire & Safety</option><option>Water</option><option>Pollution</option></select>
+          <input type="text" placeholder="Search..." style="width:180px;" id="reqSearch">
+          <button class="btn btn-primary btn-sm" onclick="openModal('modalAddReq')">+ Add Requirement</button>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table id="reqTable">
+              <thead><tr><th>ID</th><th>Requirement</th><th>Category</th><th>Plant</th><th>Assigned</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Reminder</th><th>Actions</th></tr></thead>
+              <tbody id="reqTableBody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: PLANTS
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-plants">
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; margin-bottom:20px;" id="plantsGrid">
+        </div>
+        <div class="card" id="plantDetail" style="display:none;">
+          <div class="card-header">
+            <div id="plantDetailTitle"><div class="card-title">Plant Detail</div></div>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plantDetail').style.display='none'">✕ Close</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Requirement</th><th>Category</th><th>Assigned To</th><th>Due Date</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody id="plantDetailBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: USERS
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-users">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">User Management</div>
+              <button class="btn btn-primary btn-sm" onclick="openModal('modalAddUser')">+ Add User</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Email</th><th>Plant</th><th>Role</th><th>Actions</th></tr></thead>
+                <tbody>
+                  <tr><td>K. Ramasamy</td><td>k.ramasamy@co.in</td><td>Chennai</td><td><span class="badge badge-open">Plant Head</span></td><td><button class="btn btn-ghost btn-sm">Edit</button> <button class="btn btn-danger btn-sm" onclick="confirmDelete('user')">Del</button></td></tr>
+                  <tr><td>S. Patil</td><td>s.patil@co.in</td><td>Pune</td><td><span class="badge badge-pending">Compliance Mgr</span></td><td><button class="btn btn-ghost btn-sm">Edit</button> <button class="btn btn-danger btn-sm" onclick="confirmDelete('user')">Del</button></td></tr>
+                  <tr><td>A. Patel</td><td>a.patel@co.in</td><td>Surat</td><td><span class="badge badge-complied">User</span></td><td><button class="btn btn-ghost btn-sm">Edit</button> <button class="btn btn-danger btn-sm" onclick="confirmDelete('user')">Del</button></td></tr>
+                  <tr><td>M. Sharma</td><td>m.sharma@co.in</td><td>Indore</td><td><span class="badge badge-complied">User</span></td><td><button class="btn btn-ghost btn-sm">Edit</button> <button class="btn btn-danger btn-sm" onclick="confirmDelete('user')">Del</button></td></tr>
+                  <tr><td>P. Singh</td><td>p.singh@co.in</td><td>Panipat</td><td><span class="badge badge-open">Plant Head</span></td><td><button class="btn btn-ghost btn-sm">Edit</button> <button class="btn btn-danger btn-sm" onclick="confirmDelete('user')">Del</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Groups</div>
+              <button class="btn btn-primary btn-sm" onclick="openModal('modalAddGroup')">+ New Group</button>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="font-size:13px;">Environmental Compliance</strong><span class="badge badge-open">8 members</span></div>
+                <div style="font-size:12px;color:var(--text-light);">Covers all PCB, CGWA, Water permits</div>
+                <div style="margin-top:8px;display:flex;gap:6px;"><button class="btn btn-ghost btn-sm">Manage</button><button class="btn btn-ghost btn-sm">Assign Req.</button></div>
+              </div>
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="font-size:13px;">Safety & Fire</strong><span class="badge badge-pending">5 members</span></div>
+                <div style="font-size:12px;color:var(--text-light);">Fire NOC, PESO, Factory Act compliance</div>
+                <div style="margin-top:8px;display:flex;gap:6px;"><button class="btn btn-ghost btn-sm">Manage</button><button class="btn btn-ghost btn-sm">Assign Req.</button></div>
+              </div>
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="font-size:13px;">Labor & HR</strong><span class="badge badge-complied">6 members</span></div>
+                <div style="font-size:12px;color:var(--text-light);">PF, ESIC, Contract Labor licenses</div>
+                <div style="margin-top:8px;display:flex;gap:6px;"><button class="btn btn-ghost btn-sm">Manage</button><button class="btn btn-ghost btn-sm">Assign Req.</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: REMINDERS
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-reminders">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Reminder Schedules</div>
+              <button class="btn btn-primary btn-sm" onclick="openModal('modalAddReminder')">+ New Reminder</button>
+            </div>
+            <div class="reminder-item">
+              <div class="reminder-freq">Every 7 days</div>
+              <div style="flex:1;"><div style="font-size:13px;font-weight:500;">Pre-due Reminder</div><div style="font-size:11px;color:var(--text-light);">All assigned users · 30 days before due</div></div>
+              <span class="badge badge-complied">Active</span>
+              <button class="btn btn-ghost btn-sm">Edit</button>
+            </div>
+            <div class="reminder-item">
+              <div class="reminder-freq">Every 3 days</div>
+              <div style="flex:1;"><div style="font-size:13px;font-weight:500;">Urgent Reminder</div><div style="font-size:11px;color:var(--text-light);">Plant heads + users · 7 days before due</div></div>
+              <span class="badge badge-complied">Active</span>
+              <button class="btn btn-ghost btn-sm">Edit</button>
+            </div>
+            <div class="reminder-item">
+              <div class="reminder-freq">Daily</div>
+              <div style="flex:1;"><div style="font-size:13px;font-weight:500;">Overdue Alert</div><div style="font-size:11px;color:var(--text-light);">Users + Plant Head + Manager</div></div>
+              <span class="badge badge-complied">Active</span>
+              <button class="btn btn-ghost btn-sm">Edit</button>
+            </div>
+            <div class="reminder-item">
+              <div class="reminder-freq">Monthly</div>
+              <div style="flex:1;"><div style="font-size:13px;font-weight:500;">Summary Report</div><div style="font-size:11px;color:var(--text-light);">Admin only · 1st of every month</div></div>
+              <span class="badge badge-pending">Paused</span>
+              <button class="btn btn-ghost btn-sm">Edit</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Email Notification Settings</div></div>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <div class="form-group">
+                <label>Default Sender Email</label>
+                <input type="email" value="compliance@company.in">
+              </div>
+              <div class="form-group">
+                <label>CC to Admin always</label>
+                <input type="email" value="rajesh.agarwal@company.in">
+              </div>
+              <div class="form-group">
+                <label>Reminder Lead Time (days before due)</label>
+                <input type="number" value="30">
+              </div>
+              <div class="form-group">
+                <label>Frequency for overdue items</label>
+                <select><option>Daily</option><option>Every 2 days</option><option>Every 3 days</option><option>Weekly</option></select>
+              </div>
+              <div class="form-actions" style="padding-top:0;">
+                <button class="btn btn-primary">Save Settings</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: ESCALATIONS
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-escalation">
+        <div class="grid-2">
+          <div>
+            <div class="card" style="margin-bottom:14px;">
+              <div class="card-header">
+                <div class="card-title">Escalation Ladder</div>
+                <button class="btn btn-primary btn-sm" onclick="openModal('modalAddEsc')">Configure</button>
+              </div>
+              <div class="escalation-level">
+                <div class="level-badge level-1">L1</div>
+                <div class="level-info">
+                  <div class="level-name">Plant Head</div>
+                  <div class="level-desc">Triggered after 7 days overdue — Auto email to Plant Head</div>
+                </div>
+                <span class="badge badge-pending">7 days</span>
+              </div>
+              <div class="escalation-level">
+                <div class="level-badge level-2">L2</div>
+                <div class="level-info">
+                  <div class="level-name">Regional / Zonal Manager</div>
+                  <div class="level-desc">Triggered after 14 days overdue — Email + SMS alert</div>
+                </div>
+                <span class="badge badge-medium">14 days</span>
+              </div>
+              <div class="escalation-level">
+                <div class="level-badge level-3">L3</div>
+                <div class="level-info">
+                  <div class="level-name">Top Management (MD/CEO)</div>
+                  <div class="level-desc">Critical escalation after 21 days — Full report email</div>
+                </div>
+                <span class="badge badge-high">21 days</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">Escalation Contacts</div></div>
+              <table style="font-size:13px;width:100%;border-collapse:collapse;">
+                <thead><tr><th style="padding:8px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Role</th><th style="padding:8px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Name</th><th style="padding:8px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Email</th></tr></thead>
+                <tbody>
+                  <tr><td style="padding:8px;">MD</td><td style="padding:8px;">R.K. Gupta</td><td style="padding:8px;color:var(--primary-mid);">rk.gupta@company.in</td></tr>
+                  <tr><td style="padding:8px;">CEO</td><td style="padding:8px;">S. Mehta</td><td style="padding:8px;color:var(--primary-mid);">s.mehta@company.in</td></tr>
+                  <tr><td style="padding:8px;">COO</td><td style="padding:8px;">A. Kapoor</td><td style="padding:8px;color:var(--primary-mid);">a.kapoor@company.in</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Active Escalations</div></div>
+            <table style="font-size:13px;width:100%;border-collapse:collapse;">
+              <thead><tr><th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Req.</th><th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Plant</th><th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Level</th><th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-light);">Days OD</th></tr></thead>
+              <tbody>
+                <tr><td style="padding:8px 10px;"><span class="tag">REQ-037</span></td><td style="padding:8px 10px;">Pune</td><td style="padding:8px 10px;"><span class="level-badge level-3" style="width:auto;height:auto;padding:2px 8px;display:inline-block;">L3</span></td><td style="padding:8px 10px;color:var(--danger);font-weight:500;">28</td></tr>
+                <tr><td style="padding:8px 10px;"><span class="tag">REQ-042</span></td><td style="padding:8px 10px;">Chennai</td><td style="padding:8px 10px;"><span class="level-badge level-2" style="width:auto;height:auto;padding:2px 8px;display:inline-block;">L2</span></td><td style="padding:8px 10px;color:var(--danger);font-weight:500;">15</td></tr>
+                <tr><td style="padding:8px 10px;"><span class="tag">REQ-018</span></td><td style="padding:8px 10px;">Nagpur</td><td style="padding:8px 10px;"><span class="level-badge level-1" style="width:auto;height:auto;padding:2px 8px;display:inline-block;">L1</span></td><td style="padding:8px 10px;color:var(--warning);font-weight:500;">8</td></tr>
+                <tr><td style="padding:8px 10px;"><span class="tag">REQ-061</span></td><td style="padding:8px 10px;">Kochi</td><td style="padding:8px 10px;"><span class="level-badge level-1" style="width:auto;height:auto;padding:2px 8px;display:inline-block;">L1</span></td><td style="padding:8px 10px;color:var(--warning);font-weight:500;">7</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: REPORTS
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-reports">
+        <div class="stats-grid" style="margin-bottom:20px;">
+          <div class="stat-card"><div class="stat-label">This Month</div><div class="stat-value">23</div><div class="stat-sub">Requirements closed</div></div>
+          <div class="stat-card"><div class="stat-label">Compliance Rate</div><div class="stat-value">60%</div><div class="stat-sub">↑ 4% from last month</div></div>
+          <div class="stat-card"><div class="stat-label">Avg. Close Time</div><div class="stat-value">12d</div><div class="stat-sub">Days from assignment</div></div>
+          <div class="stat-card"><div class="stat-label">Evidence Filed</div><div class="stat-value">89</div><div class="stat-sub">Attachments received</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header"><div class="card-title">Monthly Compliance Trend</div></div>
+            <canvas id="trendChart" height="200"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Export Reports</div></div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-size:13px;font-weight:500;">Plant-wise Compliance Report</div><div style="font-size:11px;color:var(--text-light);">Summary of all 12 plants</div></div><button class="btn btn-ghost btn-sm">Export XLS</button></div>
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-size:13px;font-weight:500;">Overdue & Escalation Log</div><div style="font-size:11px;color:var(--text-light);">Detailed escalation trail</div></div><button class="btn btn-ghost btn-sm">Export PDF</button></div>
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-size:13px;font-weight:500;">Evidence Register</div><div style="font-size:11px;color:var(--text-light);">All attached documents</div></div><button class="btn btn-ghost btn-sm">Export XLS</button></div>
+              <div style="padding:12px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center;"><div><div style="font-size:13px;font-weight:500;">Reminder Log</div><div style="font-size:11px;color:var(--text-light);">All email notifications sent</div></div><button class="btn btn-ghost btn-sm">Export PDF</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           PANEL: USER DASHBOARD (no login)
+      ═══════════════════════════════════ -->
+      <div class="panel" id="panel-userdash">
+        <div style="background:var(--primary-light);border:1px solid rgba(45,106,168,0.2);border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+          <div style="font-size:20px;">📧</div>
+          <div><strong style="font-size:13px;">Welcome, Mohan Singh</strong><br><span style="font-size:12px;color:var(--text-mid);">You have been assigned 4 compliance requirements. No account needed — reply directly below each task.</span></div>
+        </div>
+        <div id="userTaskList"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODALS ══════════════════════ -->
+
+<!-- ADD REQUIREMENT -->
+<div class="modal-overlay" id="modalAddReq">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <div class="modal-title">Add New Requirement</div>
+      <button class="modal-close" onclick="closeModal('modalAddReq')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Requirement Title *</label><input type="text" placeholder="e.g. Factory License Renewal"></div>
+      <div class="form-group"><label>Requirement ID</label><input type="text" placeholder="Auto-generated" value="REQ-149"></div>
+    </div>
+    <div class="form-group"><label>Description</label><textarea placeholder="Detailed description of the legal requirement..."></textarea></div>
+    <div class="form-row-3">
+      <div class="form-group"><label>Category</label><select><option>Environmental</option><option>Safety</option><option>Labor</option><option>Factory Act</option><option>Fire & Safety</option><option>Water</option><option>Pollution</option></select></div>
+      <div class="form-group"><label>Priority</label><select><option>High</option><option>Medium</option><option>Low</option></select></div>
+      <div class="form-group"><label>Applicable Act / Law</label><input type="text" placeholder="e.g. Factories Act 1948"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Plant</label><select><option>All Plants</option><option>Panipat, Haryana</option><option>Surat, Gujarat</option><option>Pune, Maharashtra</option><option>Chennai, Tamil Nadu</option><option>Indore, MP</option><option>Jaipur, Rajasthan</option><option>Lucknow, UP</option><option>Bhopal, MP</option><option>Ahmedabad, Gujarat</option><option>Nagpur, Maharashtra</option><option>Visakhapatnam, AP</option><option>Kochi, Kerala</option></select></div>
+      <div class="form-group"><label>Assign To (Email IDs)</label><input type="text" placeholder="user1@co.in, user2@co.in"></div>
+    </div>
+    <div class="form-row-3">
+      <div class="form-group"><label>Due Date *</label><input type="date"></div>
+      <div class="form-group"><label>Reminder Frequency</label><select><option>Weekly</option><option>Every 3 days</option><option>Daily</option><option>Bi-weekly</option></select></div>
+      <div class="form-group"><label>Escalation Level</label><select><option>L1 – Plant Head</option><option>L2 – Zonal Manager</option><option>L3 – Top Management</option></select></div>
+    </div>
+    <div class="form-group"><label>Supporting Documents / Reference</label><div class="upload-zone">📎 Drop files here or click to upload reference documents</div></div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalAddReq')">Cancel</button>
+      <button class="btn btn-primary" onclick="addReq()">Save & Assign</button>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW REQUIREMENT -->
+<div class="modal-overlay" id="modalView">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <div class="modal-title">Requirement Detail — REQ-042</div>
+      <button class="modal-close" onclick="closeModal('modalView')">✕</button>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab(this,'details')">Details</div>
+      <div class="tab" onclick="switchTab(this,'timeline')">Timeline</div>
+      <div class="tab" onclick="switchTab(this,'evidence')">Evidence (3)</div>
+      <div class="tab" onclick="switchTab(this,'comms')">Communications</div>
+    </div>
+    <div id="tab-details">
+      <div class="form-row">
+        <div><label>Requirement</label><p style="font-size:14px;font-weight:500;margin-top:4px;">Factory License Renewal</p></div>
+        <div><label>Category</label><p style="margin-top:4px;"><span class="badge badge-open">Factory Act</span></p></div>
+      </div>
+      <div style="margin:12px 0;padding:12px;background:var(--neutral);border-radius:8px;font-size:13px;color:var(--text-mid);">Annual renewal of factory license under the Factories Act, 1948. Must be submitted 30 days before expiry with all prescribed forms and inspection certificates.</div>
+      <div class="form-row" style="margin-top:12px;">
+        <div><label>Plant</label><p style="margin-top:4px;">Chennai Plant, Tamil Nadu</p></div>
+        <div><label>Assigned To</label><p style="margin-top:4px;">K. Ramasamy &lt;k.ramasamy@co.in&gt;</p></div>
+      </div>
+      <div class="form-row">
+        <div><label>Due Date</label><p style="margin-top:4px;color:var(--danger);font-weight:500;">Mar 15, 2025 (Overdue by 15 days)</p></div>
+        <div><label>Status</label><p style="margin-top:4px;"><span class="badge badge-overdue"><span class="dot"></span>Overdue</span></p></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-danger btn-sm" onclick="confirmDelete('req')">Delete Req.</button>
+        <button class="btn btn-ghost" onclick="closeModal('modalView')">Close</button>
+        <button class="btn btn-success">Mark Complied ✓</button>
+        <button class="btn btn-primary">Escalate ↑</button>
+      </div>
+    </div>
+    <div id="tab-timeline" style="display:none;">
+      <div class="activity-item"><div class="activity-icon" style="background:var(--danger-light);">!</div><div class="activity-body"><div class="activity-text">Escalated to Plant Head (L1)</div><div class="activity-time">Mar 22, 2025</div></div></div>
+      <div class="activity-item"><div class="activity-icon" style="background:var(--warning-light);">⏰</div><div class="activity-body"><div class="activity-text">Reminder sent — 3rd reminder (daily)</div><div class="activity-time">Mar 20, 2025</div></div></div>
+      <div class="activity-item"><div class="activity-icon" style="background:var(--warning-light);">⏰</div><div class="activity-body"><div class="activity-text">Reminder sent — 2nd reminder</div><div class="activity-time">Mar 17, 2025</div></div></div>
+      <div class="activity-item"><div class="activity-icon" style="background:var(--primary-light);">+</div><div class="activity-body"><div class="activity-text">Requirement assigned to K. Ramasamy</div><div class="activity-time">Feb 10, 2025</div></div></div>
+    </div>
+    <div id="tab-evidence" style="display:none;">
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:8px;"><span style="font-size:20px;">📄</span><div style="flex:1;"><div style="font-size:13px;font-weight:500;">Previous_License_Copy.pdf</div><div style="font-size:11px;color:var(--text-light);">Uploaded by K. Ramasamy · Mar 1, 2025 · 1.2 MB</div></div><button class="btn btn-ghost btn-sm">View</button></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:8px;"><span style="font-size:20px;">📸</span><div style="flex:1;"><div style="font-size:13px;font-weight:500;">Inspection_Report.jpg</div><div style="font-size:11px;color:var(--text-light);">Uploaded by K. Ramasamy · Mar 5, 2025 · 540 KB</div></div><button class="btn btn-ghost btn-sm">View</button></div>
+        <div class="upload-zone">📎 Upload additional evidence</div>
+      </div>
+    </div>
+    <div id="tab-comms" style="display:none;">
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">
+        <div style="padding:10px;background:var(--neutral);border-radius:8px;"><div style="font-size:11px;color:var(--text-light);margin-bottom:4px;">K. Ramasamy · Mar 10, 2025</div><div style="font-size:13px;">Application form has been submitted to the Chief Inspector of Factories. Awaiting inspection visit.</div></div>
+        <div style="padding:10px;background:var(--primary-light);border-radius:8px;text-align:right;"><div style="font-size:11px;color:var(--text-light);margin-bottom:4px;">Admin · Mar 12, 2025</div><div style="font-size:13px;">Please follow up with the department immediately. License renewal is critical.</div></div>
+      </div>
+      <textarea placeholder="Add a reply..."></textarea>
+      <div class="form-actions"><button class="btn btn-primary">Send Reply</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD USER -->
+<div class="modal-overlay" id="modalAddUser">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">Add User</div><button class="modal-close" onclick="closeModal('modalAddUser')">✕</button></div>
+    <div class="form-group"><label>Full Name</label><input type="text"></div>
+    <div class="form-group"><label>Email ID *</label><input type="email" placeholder="user@company.in"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Plant</label><select><option>Panipat</option><option>Surat</option><option>Pune</option><option>Chennai</option><option>Indore</option></select></div>
+      <div class="form-group"><label>Role</label><select><option>User</option><option>Compliance Manager</option><option>Plant Head</option></select></div>
+    </div>
+    <div class="form-group"><label>Group</label><select><option>Environmental Compliance</option><option>Safety & Fire</option><option>Labor & HR</option></select></div>
+    <div style="padding:10px;background:var(--primary-light);border-radius:8px;font-size:12px;color:var(--primary);">📧 An invitation email will be sent. Users can respond to requirements without creating an account.</div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal('modalAddUser')">Cancel</button><button class="btn btn-primary">Add & Invite</button></div>
+  </div>
+</div>
+
+<!-- ADD GROUP -->
+<div class="modal-overlay" id="modalAddGroup">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">Create Group</div><button class="modal-close" onclick="closeModal('modalAddGroup')">✕</button></div>
+    <div class="form-group"><label>Group Name</label><input type="text"></div>
+    <div class="form-group"><label>Description</label><textarea style="min-height:60px;"></textarea></div>
+    <div class="form-group"><label>Add Members (Email IDs)</label><input type="text" placeholder="Comma separated emails"></div>
+    <div class="form-group"><label>Applicable Plants</label><select multiple style="height:100px;"><option>All Plants</option><option>Panipat</option><option>Surat</option><option>Pune</option><option>Chennai</option></select></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal('modalAddGroup')">Cancel</button><button class="btn btn-primary">Create Group</button></div>
+  </div>
+</div>
+
+<!-- ADD REMINDER -->
+<div class="modal-overlay" id="modalAddReminder">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">New Reminder Schedule</div><button class="modal-close" onclick="closeModal('modalAddReminder')">✕</button></div>
+    <div class="form-group"><label>Reminder Name</label><input type="text"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Frequency</label><select><option>Daily</option><option>Every 3 days</option><option>Weekly</option><option>Bi-weekly</option><option>Monthly</option></select></div>
+      <div class="form-group"><label>Start (days before due)</label><input type="number" value="30"></div>
+    </div>
+    <div class="form-group"><label>Send To</label><select><option>Assigned User only</option><option>User + Plant Head</option><option>User + Plant Head + Manager</option><option>All levels</option></select></div>
+    <div class="form-group"><label>Applicable to Requirements</label><select><option>All Requirements</option><option>Overdue only</option><option>High Priority only</option><option>Specific Plants...</option></select></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal('modalAddReminder')">Cancel</button><button class="btn btn-primary">Save Reminder</button></div>
+  </div>
+</div>
+
+<!-- DELETE CONFIRM -->
+<div class="modal-overlay" id="modalDelete">
+  <div class="modal" style="width:380px;text-align:center;padding:28px;">
+    <div style="font-size:36px;margin-bottom:12px;">🗑️</div>
+    <div class="modal-title" style="margin-bottom:8px;" id="deleteTitle">Delete Requirement?</div>
+    <p style="font-size:13px;color:var(--text-mid);margin-bottom:20px;" id="deleteBody">This action cannot be undone. The requirement and all its evidence/communications will be permanently deleted.</p>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button class="btn btn-ghost" onclick="closeModal('modalDelete')">Cancel</button>
+      <button class="btn btn-danger" onclick="closeModal('modalDelete')">Yes, Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ESCALATION CONFIG -->
+<div class="modal-overlay" id="modalAddEsc">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">Configure Escalation</div><button class="modal-close" onclick="closeModal('modalAddEsc')">✕</button></div>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="padding:14px;border:1px solid var(--border);border-radius:8px;">
+        <div style="font-size:12px;font-weight:600;color:var(--warning);margin-bottom:10px;">LEVEL 1 — Plant Head</div>
+        <div class="form-row">
+          <div class="form-group"><label>Trigger after (days overdue)</label><input type="number" value="7"></div>
+          <div class="form-group"><label>Notify</label><select><option>Plant Head email</option><option>Plant Head + User</option></select></div>
+        </div>
+      </div>
+      <div style="padding:14px;border:1px solid var(--border);border-radius:8px;">
+        <div style="font-size:12px;font-weight:600;color:var(--danger);margin-bottom:10px;">LEVEL 2 — Regional Manager</div>
+        <div class="form-row">
+          <div class="form-group"><label>Trigger after (days overdue)</label><input type="number" value="14"></div>
+          <div class="form-group"><label>Notify</label><select><option>Zonal Manager</option><option>Zonal Manager + Plant Head</option></select></div>
+        </div>
+      </div>
+      <div style="padding:14px;border:1px solid var(--border);border-radius:8px;">
+        <div style="font-size:12px;font-weight:600;color:#7c3aed;margin-bottom:10px;">LEVEL 3 — Top Management</div>
+        <div class="form-row">
+          <div class="form-group"><label>Trigger after (days overdue)</label><input type="number" value="21"></div>
+          <div class="form-group"><label>Notify</label><select><option>MD + CEO</option><option>MD only</option><option>CEO + COO</option></select></div>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal('modalAddEsc')">Cancel</button><button class="btn btn-primary">Save Escalation Rules</button></div>
+  </div>
+</div>
+
+<script>
+// ── DATA ──
+const plants = [
+  {name:'Panipat',state:'Haryana',total:20,done:17,overdue:1,color:'var(--success)'},
+  {name:'Surat',state:'Gujarat',total:18,done:13,overdue:2,color:'var(--primary-mid)'},
+  {name:'Pune',state:'Maharashtra',total:20,done:11,overdue:3,color:'var(--warning)'},
+  {name:'Chennai',state:'Tamil Nadu',total:15,done:6,overdue:4,color:'var(--danger)'},
+  {name:'Indore',state:'Madhya Pradesh',total:12,done:9,overdue:1,color:'var(--success)'},
+  {name:'Jaipur',state:'Rajasthan',total:10,done:7,overdue:0,color:'var(--success)'},
+  {name:'Lucknow',state:'Uttar Pradesh',total:11,done:7,overdue:1,color:'var(--primary-mid)'},
+  {name:'Bhopal',state:'Madhya Pradesh',total:9,done:5,overdue:2,color:'var(--warning)'},
+  {name:'Ahmedabad',state:'Gujarat',total:14,done:8,overdue:2,color:'var(--warning)'},
+  {name:'Nagpur',state:'Maharashtra',total:8,done:3,overdue:3,color:'var(--danger)'},
+  {name:'Visakhapatnam',state:'Andhra Pradesh',total:7,done:5,overdue:0,color:'var(--success)'},
+  {name:'Kochi',state:'Kerala',total:4,done:2,overdue:1,color:'var(--warning)'},
+];
+
+const requirements = [
+  {id:'REQ-042',title:'Factory License Renewal',cat:'Factory Act',plant:'Chennai',user:'K. Ramasamy',email:'k.ramasamy@co.in',due:'2025-03-15',priority:'High',status:'Overdue',reminder:'Daily'},
+  {id:'REQ-037',title:'CGWA Water Permit',cat:'Water',plant:'Pune',user:'S. Patil',email:'s.patil@co.in',due:'2025-03-20',priority:'High',status:'Escalated',reminder:'Daily'},
+  {id:'REQ-051',title:'PCB Consent to Operate',cat:'Pollution',plant:'Indore',user:'M. Sharma',email:'m.sharma@co.in',due:'2025-04-01',priority:'High',status:'Pending',reminder:'Weekly'},
+  {id:'REQ-029',title:'PESO License — Flammable',cat:'Safety',plant:'Surat',user:'A. Patel',email:'a.patel@co.in',due:'2025-04-05',priority:'Medium',status:'Open',reminder:'Weekly'},
+  {id:'REQ-018',title:'Fire NOC Renewal',cat:'Fire & Safety',plant:'Nagpur',user:'V. Rao',email:'v.rao@co.in',due:'2025-02-28',priority:'High',status:'Overdue',reminder:'Daily'},
+  {id:'REQ-007',title:'Contract Labor License',cat:'Labor',plant:'Panipat',user:'P. Singh',email:'p.singh@co.in',due:'2025-05-30',priority:'Medium',status:'Open',reminder:'Weekly'},
+  {id:'REQ-012',title:'Hazardous Waste Authorization',cat:'Environmental',plant:'Surat',user:'A. Patel',email:'a.patel@co.in',due:'2025-06-15',priority:'High',status:'Open',reminder:'Bi-weekly'},
+  {id:'REQ-023',title:'ESIC Registration Renewal',cat:'Labor',plant:'Jaipur',user:'N. Meena',email:'n.meena@co.in',due:'2025-07-01',priority:'Low',status:'Complied',reminder:'Monthly'},
+];
+
+const userTasks = [
+  {id:'REQ-042',title:'Factory License Renewal',plant:'Chennai',due:'2025-03-15',status:'Overdue',priority:'High',desc:'Annual renewal of factory license under Factories Act, 1948. Please submit application with inspection certificate.'},
+  {id:'REQ-018',title:'Fire NOC Renewal',plant:'Chennai',due:'2025-02-28',status:'Overdue',priority:'High',desc:'Renewal of Fire No Objection Certificate from State Fire Services. Attach latest fire audit report.'},
+  {id:'REQ-067',title:'Quarterly ETP Report',plant:'Chennai',due:'2025-04-30',status:'Open',priority:'Medium',desc:'Submit quarterly effluent treatment plant compliance report to State PCB.'},
+  {id:'REQ-078',title:'PF Annual Return',plant:'Chennai',due:'2025-05-15',status:'Open',priority:'Low',desc:'File annual PF return — Form 3A and Form 6A to EPFO.'},
+];
+
+// ── PANEL SWITCHING ──
+function showPanel(id) {
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const panelId = id==='userdash'?'panel-userdash':'panel-'+id;
+  document.getElementById(panelId)?.classList.add('active');
+  const map={dashboard:0,requirements:1,plants:2,users:3,reminders:4,escalation:5,reports:6};
+  const navItems=document.querySelectorAll('.nav-item');
+  if(map[id]!==undefined) navItems[map[id]]?.classList.add('active');
+
+  const titles={dashboard:'Group Dashboard',requirements:'Requirements Register',plants:'Plant Management',users:'Users & Groups',reminders:'Reminder Settings',escalation:'Escalation Matrix',reports:'Reports & Analytics',userdash:'My Compliance Tasks'};
+  document.getElementById('topbarTitle').textContent = titles[id]||id;
+
+  if(id==='plants') renderPlants();
+  if(id==='requirements') renderReqTable();
+  if(id==='userdash') renderUserDash();
+  if(id==='reports') setTimeout(initTrendChart,100);
+}
+
+// ── ROLE SWITCHING ──
+function switchRole(role) {
+  document.getElementById('btnAdmin').classList.toggle('active',role==='admin');
+  document.getElementById('btnPlant').classList.toggle('active',role==='plant');
+  document.getElementById('btnUser').classList.toggle('active',role==='user');
+
+  if(role==='admin'){
+    document.getElementById('userName').textContent='Rajesh Agarwal';
+    document.getElementById('userRole').textContent='Group Admin';
+    document.getElementById('avatarEl').textContent='RA';
+    document.getElementById('roleLabel').textContent='Admin Panel';
+    document.getElementById('topbarContext').textContent='All 12 Plants';
+    document.getElementById('btnAddReq').style.display='';
+    ['navPlants','navUsers','navReminders','navEsc','navReports'].forEach(id=>document.getElementById(id).style.display='');
+    showPanel('dashboard');
+  } else if(role==='plant'){
+    document.getElementById('userName').textContent='Pankaj Singh';
+    document.getElementById('userRole').textContent='Plant Head — Panipat';
+    document.getElementById('avatarEl').textContent='PS';
+    document.getElementById('roleLabel').textContent='Plant Head';
+    document.getElementById('topbarContext').textContent='Panipat Plant';
+    document.getElementById('btnAddReq').style.display='none';
+    ['navUsers','navReminders','navEsc'].forEach(id=>document.getElementById(id).style.display='none');
+    showPanel('requirements');
+  } else {
+    document.getElementById('userName').textContent='Mohan Singh';
+    document.getElementById('userRole').textContent='Compliance User';
+    document.getElementById('avatarEl').textContent='MS';
+    document.getElementById('roleLabel').textContent='User Panel';
+    document.getElementById('topbarContext').textContent='Chennai Plant';
+    document.getElementById('btnAddReq').style.display='none';
+    ['navPlants','navUsers','navReminders','navEsc','navReports'].forEach(id=>document.getElementById(id).style.display='none');
+    showPanel('userdash');
+  }
+}
+
+// ── MODALS ──
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
+
+// ── DELETE CONFIRM ──
+function confirmDelete(type){
+  const titles={req:'Delete Requirement?',user:'Remove User?'};
+  const bodies={req:'This action cannot be undone. The requirement and all its evidence/communications will be permanently deleted.',user:'This user will be removed from all assignments and groups.'};
+  document.getElementById('deleteTitle').textContent=titles[type]||'Confirm Delete?';
+  document.getElementById('deleteBody').textContent=bodies[type]||'Are you sure?';
+  openModal('modalDelete');
+}
+
+// ── TABS ──
+function switchTab(el,id){
+  el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  ['details','timeline','evidence','comms'].forEach(t=>{const el=document.getElementById('tab-'+t);if(el)el.style.display='none';});
+  const target=document.getElementById('tab-'+id);
+  if(target) target.style.display='';
+}
+
+// ── PLANTS ──
+function renderPlants(){
+  const grid=document.getElementById('plantsGrid');
+  grid.innerHTML=plants.map(p=>{
+    const pct=Math.round(p.done/p.total*100);
+    const color=pct>=80?'var(--success)':pct>=60?'var(--primary-mid)':pct>=40?'var(--warning)':'var(--danger)';
+    return `<div class="plant-card" onclick="showPlantDetail('${p.name}')">
+      <div class="plant-name">${p.name}</div>
+      <div class="plant-state">${p.state}</div>
+      <div class="progress"><div class="progress-fill" style="width:${pct}%;background:${color};"></div></div>
+      <div class="plant-stats">
+        <div class="plant-stat"><div class="plant-stat-val" style="color:${color};">${pct}%</div><div class="plant-stat-label">Rate</div></div>
+        <div class="plant-stat"><div class="plant-stat-val">${p.done}/${p.total}</div><div class="plant-stat-label">Done</div></div>
+        <div class="plant-stat"><div class="plant-stat-val" style="color:var(--danger);">${p.overdue}</div><div class="plant-stat-label">Overdue</div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function showPlantDetail(name){
+  const detail=document.getElementById('plantDetail');
+  detail.style.display='block';
+  document.getElementById('plantDetailTitle').innerHTML=`<div class="card-title">${name} Plant — Requirements</div>`;
+  const rows=requirements.filter(r=>r.plant===name||requirements.length);
+  const statusClass={Open:'open',Pending:'pending',Complied:'complied',Overdue:'overdue',Escalated:'escalated'};
+  document.getElementById('plantDetailBody').innerHTML=requirements.slice(0,5).map(r=>`
+    <tr><td><span class="tag">${r.id}</span></td><td>${r.title}</td><td><span class="tag">${r.cat}</span></td><td>${r.user}</td><td>${r.due}</td><td><span class="badge badge-${statusClass[r.status]||'open'}"><span class="dot"></span>${r.status}</span></td><td><button class="btn btn-ghost btn-sm" onclick="openModal('modalView')">View</button></td></tr>
+  `).join('');
+  detail.scrollIntoView({behavior:'smooth'});
+}
+
+// ── REQ TABLE ──
+function renderReqTable(){
+  const statusClass={Open:'open',Pending:'pending',Complied:'complied',Overdue:'overdue',Escalated:'escalated'};
+  document.getElementById('reqTableBody').innerHTML=requirements.map(r=>`
+    <tr>
+      <td><span class="tag">${r.id}</span></td>
+      <td style="font-weight:500;">${r.title}</td>
+      <td><span class="tag">${r.cat}</span></td>
+      <td>${r.plant}</td>
+      <td>${r.user}<br><span style="font-size:11px;color:var(--text-light);">${r.email}</span></td>
+      <td style="color:${r.status==='Overdue'?'var(--danger)':r.status==='Escalated'?'#7c3aed':'inherit'};font-size:12px;">${r.due}</td>
+      <td><span class="badge badge-${r.priority.toLowerCase()}">${r.priority}</span></td>
+      <td><span class="badge badge-${statusClass[r.status]||'open'}"><span class="dot"></span>${r.status}</span></td>
+      <td><span class="badge badge-open">${r.reminder}</span></td>
+      <td style="display:flex;gap:4px;">
+        <button class="btn btn-ghost btn-sm" onclick="openModal('modalView')">View</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDelete('req')">Del</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// ── USER DASHBOARD ──
+function renderUserDash(){
+  const statusClass={Open:'open',Pending:'pending',Overdue:'overdue'};
+  document.getElementById('userTaskList').innerHTML=userTasks.map(t=>`
+    <div class="task-item">
+      <div class="task-header">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span class="tag">${t.id}</span>
+            <span class="badge badge-${statusClass[t.status]||'open'}"><span class="dot"></span>${t.status}</span>
+            <span class="badge badge-${t.priority.toLowerCase()}">${t.priority}</span>
+          </div>
+          <div class="task-title">${t.title}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:11px;color:var(--text-light);">Due Date</div>
+          <div style="font-size:13px;font-weight:500;color:${t.status==='Overdue'?'var(--danger)':'inherit'};">${t.due}</div>
+        </div>
+      </div>
+      <div class="task-meta">
+        <span>📍 ${t.plant} Plant</span>
+      </div>
+      <div style="margin-top:8px;font-size:13px;color:var(--text-mid);background:var(--neutral);padding:8px 10px;border-radius:6px;">${t.desc}</div>
+      <div class="task-actions">
+        <button class="btn btn-success btn-sm" onclick="this.textContent='✓ Marked Complied';this.disabled=true;">✓ Mark as Complied</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleReply(this)">💬 Reply</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleUpload(this)">📎 Attach Evidence</button>
+      </div>
+      <div class="reply-box" style="display:none;">
+        <textarea placeholder="Type your reply or update here..."></textarea>
+        <div style="margin-top:8px;display:flex;justify-content:flex-end;"><button class="btn btn-primary btn-sm">Send Reply</button></div>
+      </div>
+      <div class="upload-zone" style="display:none;" onclick="alert('File picker would open here')">📎 Click to attach evidence document (PDF, JPG, PNG, XLSX)</div>
+    </div>
+  `).join('');
+}
+
+function toggleReply(btn){
+  const item=btn.closest('.task-item');
+  const box=item.querySelector('.reply-box');
+  box.style.display=box.style.display==='none'?'block':'none';
+}
+function toggleUpload(btn){
+  const item=btn.closest('.task-item');
+  const zone=item.querySelector('.upload-zone');
+  zone.style.display=zone.style.display==='none'?'block':'none';
+}
+
+// ── ADD REQ ──
+function addReq(){
+  closeModal('modalAddReq');
+  const badge=document.getElementById('navBadge');
+  badge.textContent=parseInt(badge.textContent)+1;
+  alert('Requirement saved & assignment emails sent to users!');
+}
+
+// ── CHARTS ──
+let barChart, donutChart, trendChart;
+
+function initCharts(){
+  const barCtx=document.getElementById('barChart')?.getContext('2d');
+  if(barCtx && !barChart){
+    barChart=new Chart(barCtx,{
+      type:'bar',
+      data:{
+        labels:plants.map(p=>p.name),
+        datasets:[
+          {label:'Complied',data:plants.map(p=>p.done),backgroundColor:'#1a7a4a',borderRadius:3},
+          {label:'Overdue',data:plants.map(p=>p.overdue),backgroundColor:'#c0392b',borderRadius:3},
+          {label:'Pending',data:plants.map(p=>p.total-p.done-p.overdue),backgroundColor:'#d3d1c7',borderRadius:3},
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:true,
+        plugins:{legend:{position:'top',labels:{font:{size:11},boxWidth:10}}},
+        scales:{
+          x:{stacked:true,grid:{display:false},ticks:{font:{size:11}}},
+          y:{stacked:true,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:11}}}
+        }
+      }
+    });
+  }
+
+  const dCtx=document.getElementById('donutChart')?.getContext('2d');
+  if(dCtx && !donutChart){
+    donutChart=new Chart(dCtx,{
+      type:'doughnut',
+      data:{
+        labels:['Complied','In Progress','Pending','Overdue','Escalated'],
+        data:[89,36,23,23,7],
+        datasets:[{data:[89,36,23,23,7],backgroundColor:['#1a7a4a','#2d6aa8','#b85c00','#c0392b','#7c3aed'],borderWidth:0,hoverOffset:4}]
+      },
+      options:{responsive:true,maintainAspectRatio:true,cutout:'72%',plugins:{legend:{display:false}}}
+    });
+  }
+}
+
+function initTrendChart(){
+  const ctx=document.getElementById('trendChart')?.getContext('2d');
+  if(ctx && !trendChart){
+    trendChart=new Chart(ctx,{
+      type:'line',
+      data:{
+        labels:['Oct','Nov','Dec','Jan','Feb','Mar','Apr'],
+        datasets:[
+          {label:'Compliance Rate %',data:[48,52,55,57,60,60,62],borderColor:'#2d6aa8',backgroundColor:'rgba(45,106,168,0.08)',tension:0.4,fill:true,pointRadius:4,pointBackgroundColor:'#2d6aa8'},
+          {label:'Overdue Count',data:[31,28,26,24,23,23,20],borderColor:'#c0392b',backgroundColor:'rgba(192,57,43,0.04)',tension:0.4,fill:true,pointRadius:4,pointBackgroundColor:'#c0392b'},
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:true,
+        plugins:{legend:{position:'top',labels:{font:{size:11},boxWidth:10}}},
+        scales:{
+          x:{grid:{display:false},ticks:{font:{size:11}}},
+          y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:11}}}
+        }
+      }
+    });
+  }
+}
+
+// init
+setTimeout(()=>{
+  initCharts();
+  renderPlants();
+},300);
+</script>
+</body>
+</html>
