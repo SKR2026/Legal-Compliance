@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LegalComp Pro</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,400&display=swap" />
+
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Recharts (needs prop-types) -->
+  <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+
+  <!-- Babel standalone (transpile JSX in browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: 'DM Sans', sans-serif; }
+    .dark { color-scheme: dark; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+const {
+  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  Legend, ResponsiveContainer, RadarChart, Radar, PolarGrid,
+  PolarAngleAxis, PolarRadiusAxis
+} = Recharts;
+
+/* ─── localStorage shim (replaces window.storage) ─── */
+const storage = {
+  get: (key) => {
+    try {
+      const val = localStorage.getItem(key);
+      return val !== null ? { value: val } : null;
+    } catch { return null; }
+  },
+  set: (key, val) => {
+    try { localStorage.setItem(key, val); return true; } catch { return null; }
+  }
+};
+
+/* ─── CONSTANTS ─── */
+const CHART_COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6'];
+const STATUS_CLR  = { Pending:'#f59e0b', 'In Progress':'#6366f1', Completed:'#22c55e', Overdue:'#ef4444' };
+const PRIORITY_CLR= { Critical:'#ef4444', High:'#f97316', Medium:'#f59e0b', Low:'#22c55e' };
+const CATEGORIES  = ['Environmental','Safety','Labor','Fire NOC','Factory License','Pollution Control','Quality','Other'];
+const PRIORITIES  = ['Critical','High','Medium','Low'];
+const STATUSES    = ['Pending','In Progress','Completed','Overdue'];
+const REM_FREQS   = ['Daily','Weekly','Bi-Weekly','Monthly'];
+const IND_STATES  = ['Maharashtra','Gujarat','Tamil Nadu','Karnataka','Rajasthan','West Bengal','Uttar Pradesh','Telangana','Andhra Pradesh','Punjab','Madhya Pradesh','Odisha','Haryana'];
+const ESC_LABELS  = ['Level 1 – Plant Head','Level 2 – Regional Manager','Level 3 – Top Management'];
+
+/* ─── DEFAULT DATA ─── */
+const mkPlants = () => IND_STATES.map((st, i) => ({
+  id:`p${i+1}`, name:`Plant ${String.fromCharCode(65+i)}`, state:st, active:true
+}));
+
+const mkUsers = () => [
+  { id:'admin1', name:'Super Admin',    email:'admin@legalcomp.com',  password:'Admin@123', role:'admin',      plantId:null, dept:'Management', phone:'+91-9000000001' },
+  { id:'ph1',   name:'Rajesh Kumar',   email:'rajesh@legalcomp.com', password:'Head@123',  role:'plant_head', plantId:'p1', dept:'Operations', phone:'+91-9000000002' },
+  { id:'ph2',   name:'Priya Sharma',   email:'priya@legalcomp.com',  password:'Head@123',  role:'plant_head', plantId:'p2', dept:'Operations', phone:'+91-9000000003' },
+  { id:'ph3',   name:'Amit Patel',     email:'amit@legalcomp.com',   password:'Head@123',  role:'plant_head', plantId:'p3', dept:'Operations', phone:'+91-9000000004' },
+  { id:'u1',    name:'Suresh Reddy',   email:'suresh@legalcomp.com', password:'User@123',  role:'user',       plantId:'p1', dept:'EHS',         phone:'+91-9000000005' },
+  { id:'u2',    name:'Meena Joshi',    email:'meena@legalcomp.com',  password:'User@123',  role:'user',       plantId:'p1', dept:'Legal',       phone:'+91-9000000006' },
+  { id:'u3',    name:'Kiran Singh',    email:'kiran@legalcomp.com',  password:'User@123',  role:'user',       plantId:'p2', dept:'EHS',         phone:'+91-9000000007' },
+  { id:'u4',    name:'Deepa Nair',     email:'deepa@legalcomp.com',  password:'User@123',  role:'user',       plantId:'p2', dept:'Safety',      phone:'+91-9000000008' },
+  { id:'u5',    name:'Ravi Verma',     email:'ravi@legalcomp.com',   password:'User@123',  role:'user',       plantId:'p3', dept:'Compliance',  phone:'+91-9000000009' },
+];
+
+const mkRequirements = (plants, users) => {
+  const titles = [
+    'Factory License Renewal','Pollution Control Board NOC','Fire Safety Certificate',
+    'ESI Compliance Report','PF Annual Return Filing','Environmental Clearance Certificate',
+    'Hazardous Waste Authorization','Electrical Safety Audit','Labor Law Compliance Check',
+    'Boiler Inspection Certificate',
+  ];
+  const reqs = []; let n = 1;
+  plants.forEach((plant, pi) => {
+    const pu = users.filter(u => u.plantId === plant.id && u.role === 'user');
+    titles.slice(0, 5).forEach((title, ti) => {
+      const status = STATUSES[(pi * 2 + ti) % 4];
+      reqs.push({
+        id:`r${n++}`, title,
+        description:`Ensure ${title} compliance for ${plant.name} under applicable statutory regulations and rules enforced by the respective authority.`,
+        category: CATEGORIES[ti % CATEGORIES.length],
+        priority: PRIORITIES[ti % 4],
+        plantId: plant.id,
+        assignedTo: pu.length ? pu[ti % pu.length].id : null,
+        status,
+        dueDate: new Date(Date.now() + (ti - 2) * 21 * 86400000).toISOString().split('T')[0],
+        reminderFrequency: REM_FREQS[ti % 4],
+        escalationLevel: (ti % 3) + 1,
+        escalationEmail: 'ceo@legalcomp.com',
+        createdAt: new Date(Date.now() - ti * 7 * 86400000).toISOString(),
+        evidence: ti < 2 ? [{ id:'ev1', name:'Compliance_Certificate.pdf', size:'245 KB', uploadedAt: new Date().toISOString(), uploadedBy: pu[0]?.id }] : [],
+        comments: ti === 0 ? [{ id:'c1', text:'Submitted to PCB office, awaiting acknowledgment.', userId: pu[0]?.id, createdAt: new Date().toISOString() }] : []
+      });
+    });
+  });
+  return reqs;
+};
+
+/* ─── HELPERS ─── */
+const initials = (name='') => name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+const formatDate = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const daysLeft = d => { const diff = Math.ceil((new Date(d) - Date.now()) / 86400000); return diff; };
+
+/* ─── SMALL REUSABLES ─── */
+const Badge = ({ label, color }) => (
+  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+    style={{ background: color+'22', color }}>{label}</span>
+);
+
+function Modal({ open, onClose, title, children, wide }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{backdropFilter:'blur(4px)',background:'rgba(0,0,0,0.55)'}}>
+      <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${wide?'max-w-3xl':'max-w-lg'} max-h-[90vh] flex flex-col`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <h2 className="font-semibold text-lg text-gray-900 dark:text-white">{title}</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({ open, message, onConfirm, onCancel }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{backdropFilter:'blur(4px)',background:'rgba(0,0,0,0.55)'}}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <div className="text-center mb-5">
+          <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">🗑️</div>
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Confirm Delete</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{message || 'This action cannot be undone.'}</p>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+          <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors">Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FormField({ label, required, children }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const inputCls = "w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition";
+const selectCls = inputCls + " cursor-pointer";
+
+/* ─── APP SHELL ─── */
+function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage, children, role, logout }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const roleTag = { admin:'Administrator', plant_head:'Plant Head', user:'Team Member' }[role];
+  const roleBg  = { admin:'bg-indigo-100 text-indigo-700', plant_head:'bg-teal-100 text-teal-700', user:'bg-green-100 text-green-700' }[role];
+
+  return (
+    <div className={`flex h-screen overflow-hidden font-sans ${dk?'bg-gray-900 text-white':'bg-slate-50 text-gray-900'}`}
+      style={{fontFamily:"'DM Sans', sans-serif"}}>
+      {/* ── Sidebar ── */}
+      <aside className={`${collapsed?'w-16':'w-60'} transition-all duration-300 flex-shrink-0 flex flex-col`}
+        style={{background: dk?'#111827':'#0f172a'}}>
+        <div className="flex items-center gap-2.5 px-4 py-5 border-b border-white/10">
+          <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white flex-shrink-0">⚖️</div>
+          {!collapsed && <span className="font-bold text-white text-sm leading-tight" style={{fontFamily:"'Outfit',sans-serif"}}>LegalComp<br/><span className="text-indigo-400 text-xs font-medium">Pro</span></span>}
+        </div>
+        <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+          {nav.map(item => (
+            <button key={item.id} onClick={() => setActivePage(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 ${
+                activePage===item.id
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40'
+                  : 'text-slate-400 hover:text-white hover:bg-white/10'
+              }`}>
+              <span className="text-base flex-shrink-0">{item.icon}</span>
+              {!collapsed && <span className="font-medium truncate">{item.label}</span>}
+              {!collapsed && item.badge > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[18px] text-center">{item.badge}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-white/10">
+          {!collapsed && (
+            <div className="flex items-center gap-2 px-2 py-2 rounded-xl hover:bg-white/10 transition-colors mb-1">
+              <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">{initials(currentUser?.name)}</div>
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-xs font-semibold truncate">{currentUser?.name}</p>
+                <p className="text-slate-400 text-xs truncate">{currentUser?.email}</p>
+              </div>
+            </div>
+          )}
+          <button onClick={logout} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 text-sm transition-colors">
+            <span>🚪</span>{!collapsed && <span>Logout</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Main ── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className={`h-14 flex items-center justify-between px-6 border-b flex-shrink-0 ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`}>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setCollapsed(!collapsed)} className={`p-2 rounded-lg text-sm ${dk?'hover:bg-gray-700 text-gray-400':'hover:bg-gray-100 text-gray-500'} transition-colors`}>☰</button>
+            <h1 className="font-semibold text-sm">{nav.find(n=>n.id===activePage)?.label}</h1>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBg}`}>{roleTag}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={toggleTheme} className={`p-2 rounded-lg transition-colors ${dk?'text-yellow-400 hover:bg-gray-700':'text-slate-600 hover:bg-gray-100'}`} title="Toggle Theme">
+              {dk?'☀️':'🌙'}
+            </button>
+            <div className={`text-xs px-3 py-1.5 rounded-lg font-medium ${dk?'bg-gray-700 text-gray-300':'bg-gray-100 text-gray-600'}`}>
+              {new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 overflow-auto p-6">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+/* ─── STAT CARD ─── */
+function StatCard({ label, value, icon, color, sub, trend, dk }) {
+  const cardBg = dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200';
+  return (
+    <div className={`rounded-2xl border p-5 ${cardBg} shadow-sm`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl ${color}`}>{icon}</div>
+        {trend !== undefined && (
+          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${trend>=0?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
+            {trend>=0?'↑':'↓'} {Math.abs(trend)}%
+          </span>
+        )}
+      </div>
+      <p className="text-3xl font-bold mb-0.5" style={{fontFamily:"'Outfit',sans-serif"}}>{value}</p>
+      <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   LOGIN PAGE
+═══════════════════════════════════════════ */
+function LoginPage({ login }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [showPwd, setShowPwd] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    if (!email || !password) { setError('Please enter your credentials.'); return; }
+    setLoading(true); setError('');
+    await new Promise(r=>setTimeout(r,600));
+    if (!login(email, password)) setError('Invalid email or password. Please try again.');
+    setLoading(false);
+  };
+
+  const demos = [
+    { role:'Admin',      color:'#6366f1', email:'admin@legalcomp.com',  pwd:'Admin@123' },
+    { role:'Plant Head', color:'#06b6d4', email:'rajesh@legalcomp.com', pwd:'Head@123'  },
+    { role:'User',       color:'#22c55e', email:'suresh@legalcomp.com', pwd:'User@123'  },
+  ];
+
+  return (
+    <div className="min-h-screen flex" style={{fontFamily:"'DM Sans',sans-serif"}}>
+      {/* Left */}
+      <div className="hidden lg:flex w-[45%] flex-col justify-center p-16 relative overflow-hidden"
+        style={{background:'linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)'}}>
+        <div className="absolute inset-0 opacity-10"
+          style={{backgroundImage:'radial-gradient(circle at 20% 50%, #6366f1 0%, transparent 50%), radial-gradient(circle at 80% 20%, #06b6d4 0%, transparent 50%)'}} />
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-10">
+            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-2xl shadow-xl shadow-indigo-900">⚖️</div>
+            <div>
+              <h1 className="text-white font-bold text-xl leading-none" style={{fontFamily:"'Outfit',sans-serif"}}>LegalComp Pro</h1>
+              <p className="text-indigo-400 text-xs mt-0.5">Compliance Management System</p>
+            </div>
+          </div>
+          <h2 className="text-4xl font-bold text-white leading-tight mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>
+            Legal & Regulatory<br/>Compliance at<br/><span className="text-indigo-400">Scale</span>
+          </h2>
+          <p className="text-slate-400 text-base mb-10 leading-relaxed">
+            Track, manage, and automate compliance requirements across all your plants — from factory licenses to environmental clearances.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['📊','Advanced Analytics'],['🏭','12 Plant Support'],['🔔','Auto Reminders'],['🔐','Role-Based Access'],['📎','Evidence Management'],['⚡','Escalation Engine']].map(([i,l])=>(
+              <div key={l} className="flex items-center gap-2.5 bg-white/5 rounded-xl px-3.5 py-2.5 border border-white/10">
+                <span className="text-base">{i}</span>
+                <span className="text-slate-300 text-xs font-medium">{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Right */}
+      <div className="flex-1 flex items-center justify-center bg-slate-50 p-8">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-1" style={{fontFamily:"'Outfit',sans-serif"}}>Sign In</h2>
+            <p className="text-gray-500 text-sm">Access your compliance dashboard</p>
+          </div>
+
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4 text-sm flex items-center gap-2"><span>⚠️</span>{error}</div>}
+
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Email Address</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Password</label>
+              <div className="relative">
+                <input type={showPwd?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)}
+                  placeholder="••••••••" onKeyDown={e=>e.key==='Enter'&&handleLogin()}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition pr-12" />
+                <button onClick={()=>setShowPwd(!showPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm p-1">{showPwd?'🙈':'👁️'}</button>
+              </div>
+            </div>
+            <button onClick={handleLogin} disabled={loading}
+              className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-60 transition-colors shadow-lg shadow-indigo-200">
+              {loading?'Authenticating…':'Sign In →'}
+            </button>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Quick Demo Access</p>
+            <div className="space-y-2">
+              {demos.map(d=>(
+                <button key={d.role} onClick={()=>{setEmail(d.email);setPassword(d.pwd);}}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-gray-50 transition-colors text-left border border-transparent hover:border-gray-200">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                    style={{background:d.color}}>{d.role[0]}</div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-700">{d.role}</p>
+                    <p className="text-xs text-gray-400">{d.email}</p>
+                  </div>
+                  <span className="ml-auto text-gray-300 text-xs">Click to fill →</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN – OVERVIEW
+═══════════════════════════════════════════ */
+function AdminOverview({ dk, plants, users, requirements }) {
+  const total     = requirements.length;
+  const completed = requirements.filter(r=>r.status==='Completed').length;
+  const overdue   = requirements.filter(r=>r.status==='Overdue').length;
+  const pending   = requirements.filter(r=>r.status==='Pending').length;
+  const inProg    = requirements.filter(r=>r.status==='In Progress').length;
+  const compliance= total ? Math.round(completed/total*100) : 0;
+
+  const plantBar = plants.slice(0,8).map(p => {
+    const pr = requirements.filter(r=>r.plantId===p.id);
+    return { name:p.name.replace('Plant ','P'), C:pr.filter(r=>r.status==='Completed').length, P:pr.filter(r=>r.status==='Pending').length, I:pr.filter(r=>r.status==='In Progress').length, O:pr.filter(r=>r.status==='Overdue').length };
+  });
+
+  const statusPie = STATUSES.map(s=>({ name:s, value:requirements.filter(r=>r.status===s).length }));
+  const catPie    = CATEGORIES.map(c=>({ name:c, value:requirements.filter(r=>r.category===c).length })).filter(d=>d.value>0);
+  const months    = ['Jan','Feb','Mar','Apr','May','Jun'];
+  const trendData = months.map((m,i)=>({ m, Compliance:58+i*5+(i%2)*3, Target:90 }));
+
+  const card = `rounded-2xl border p-5 shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = `text-xs ${dk?'text-gray-400':'text-gray-500'}`;
+  const TT   = { contentStyle:{ background:dk?'#1f2937':'white', border:'none', borderRadius:10, fontSize:12, boxShadow:'0 4px 20px rgba(0,0,0,0.15)' } };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+        <StatCard dk={dk} label="Total Requirements" value={total}      icon="📋" color="bg-indigo-100 text-indigo-600" sub={`Across ${plants.length} plants`} />
+        <StatCard dk={dk} label="Compliance Rate"    value={`${compliance}%`} icon="✅" color="bg-green-100 text-green-600"  sub={`${completed} completed`} trend={4} />
+        <StatCard dk={dk} label="In Progress"        value={inProg}     icon="⏳" color="bg-blue-100 text-blue-600"    sub={`${pending} pending`} />
+        <StatCard dk={dk} label="Overdue"            value={overdue}    icon="🚨" color="bg-red-100 text-red-600"     sub="Immediate action needed" trend={-2} />
+        <StatCard dk={dk} label="Active Users"       value={users.filter(u=>u.role==='user').length} icon="👥" color="bg-purple-100 text-purple-600" sub={`${users.filter(u=>u.role==='plant_head').length} plant heads`} />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className={`${card} xl:col-span-2`}>
+          <h3 className="font-semibold mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>Requirements by Plant & Status</h3>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={plantBar} barSize={10} barGap={2}>
+              <CartesianGrid strokeDasharray="3 3" stroke={dk?'#374151':'#f1f5f9'} vertical={false} />
+              <XAxis dataKey="name" tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false} />
+              <YAxis tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false} />
+              <Tooltip {...TT} />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:12}} />
+              <Bar dataKey="C" name="Completed" fill="#22c55e" radius={[3,3,0,0]} />
+              <Bar dataKey="I" name="In Progress" fill="#6366f1" radius={[3,3,0,0]} />
+              <Bar dataKey="P" name="Pending" fill="#f59e0b" radius={[3,3,0,0]} />
+              <Bar dataKey="O" name="Overdue" fill="#ef4444" radius={[3,3,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className={card}>
+          <h3 className="font-semibold mb-3" style={{fontFamily:"'Outfit',sans-serif"}}>Status Distribution</h3>
+          <ResponsiveContainer width="100%" height={170}>
+            <PieChart>
+              <Pie data={statusPie} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="value">
+                {statusPie.map((e,i)=><Cell key={i} fill={Object.values(STATUS_CLR)[i]} />)}
+              </Pie>
+              <Tooltip {...TT} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="space-y-2 mt-2">
+            {statusPie.map((s,i)=>(
+              <div key={s.name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background:Object.values(STATUS_CLR)[i]}} />
+                  <span className={sub}>{s.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className={`h-1.5 rounded-full w-16 ${dk?'bg-gray-700':'bg-gray-100'}`}>
+                    <div className="h-full rounded-full" style={{width:`${total?s.value/total*100:0}%`,background:Object.values(STATUS_CLR)[i]}} />
+                  </div>
+                  <span className="text-xs font-semibold w-5 text-right">{s.value}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className={card}>
+          <h3 className="font-semibold mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>Compliance Trend</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={trendData}>
+              <defs>
+                <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25}/>
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={dk?'#374151':'#f1f5f9'} vertical={false}/>
+              <XAxis dataKey="m" tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false}/>
+              <YAxis domain={[50,100]} tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false}/>
+              <Tooltip {...TT} />
+              <Area type="monotone" dataKey="Compliance" stroke="#6366f1" fill="url(#cg)" strokeWidth={2.5} dot={{r:4,fill:'#6366f1'}} />
+              <Line type="monotone" dataKey="Target" stroke="#ef4444" strokeDasharray="5 5" strokeWidth={2} dot={false} />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:12}} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className={card}>
+          <h3 className="font-semibold mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>By Category</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={catPie} cx="50%" cy="50%" outerRadius={80} dataKey="value"
+                label={({name,percent})=>`${name.split(' ')[0]} ${(percent*100).toFixed(0)}%`}
+                labelLine={false} fontSize={10} fontFamily="DM Sans">
+                {catPie.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]} />)}
+              </Pie>
+              <Tooltip {...TT} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {overdue > 0 && (
+        <div className={card}>
+          <h3 className="font-semibold mb-3 text-red-500" style={{fontFamily:"'Outfit',sans-serif"}}>🚨 Overdue Requirements</h3>
+          <div className="space-y-2">
+            {requirements.filter(r=>r.status==='Overdue').slice(0,5).map(r=>{
+              const plant=plants.find(p=>p.id===r.plantId);
+              return (
+                <div key={r.id} className={`flex items-center justify-between p-3 rounded-xl ${dk?'bg-red-900/20 border border-red-800/40':'bg-red-50 border border-red-100'}`}>
+                  <div>
+                    <p className="text-sm font-medium text-red-600">{r.title}</p>
+                    <p className={`text-xs ${sub}`}>{plant?.name} · {r.category} · Due {formatDate(r.dueDate)}</p>
+                  </div>
+                  <Badge label={`${Math.abs(daysLeft(r.dueDate))}d overdue`} color="#ef4444" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   REQUIREMENT MODAL (Add / Edit)
+═══════════════════════════════════════════ */
+function RequirementModal({ open, onClose, onSave, initial, plants, users, dk }) {
+  const blank = { title:'', description:'', category:CATEGORIES[0], priority:'High', plantId:'', assignedTo:'', status:'Pending', dueDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'' };
+  const [form, setForm] = useState(blank);
+  const [saving, setSaving] = useState(false);
+  useEffect(()=>{ setForm(initial || blank); }, [open]);
+
+  const plantUsers = users.filter(u=>u.plantId===form.plantId && u.role==='user');
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const save = async () => {
+    if (!form.title || !form.plantId || !form.dueDate) return;
+    setSaving(true);
+    await new Promise(r=>setTimeout(r,400));
+    onSave(form);
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial?'Edit Requirement':'Add New Requirement'} wide>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
+          <FormField label="Title" required>
+            <input value={form.title} onChange={e=>set('title',e.target.value)} placeholder="e.g. Factory License Renewal" className={inputCls} />
+          </FormField>
+        </div>
+        <div className="sm:col-span-2">
+          <FormField label="Description">
+            <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={2} placeholder="Detailed description..." className={inputCls + ' resize-none'} />
+          </FormField>
+        </div>
+        <FormField label="Plant" required>
+          <select value={form.plantId} onChange={e=>{set('plantId',e.target.value);set('assignedTo','');}} className={selectCls}>
+            <option value="">Select Plant</option>
+            {plants.map(p=><option key={p.id} value={p.id}>{p.name} ({p.state})</option>)}
+          </select>
+        </FormField>
+        <FormField label="Assign To (Email / User)">
+          <select value={form.assignedTo} onChange={e=>set('assignedTo',e.target.value)} className={selectCls} disabled={!form.plantId}>
+            <option value="">Select User</option>
+            {plantUsers.map(u=><option key={u.id} value={u.id}>{u.name} – {u.email}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Category" required>
+          <select value={form.category} onChange={e=>set('category',e.target.value)} className={selectCls}>
+            {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Priority" required>
+          <select value={form.priority} onChange={e=>set('priority',e.target.value)} className={selectCls}>
+            {PRIORITIES.map(p=><option key={p}>{p}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Status">
+          <select value={form.status} onChange={e=>set('status',e.target.value)} className={selectCls}>
+            {STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Due Date" required>
+          <input type="date" value={form.dueDate} onChange={e=>set('dueDate',e.target.value)} className={inputCls} />
+        </FormField>
+        <FormField label="Reminder Frequency">
+          <select value={form.reminderFrequency} onChange={e=>set('reminderFrequency',e.target.value)} className={selectCls}>
+            {REM_FREQS.map(r=><option key={r}>{r}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Escalation Level">
+          <select value={form.escalationLevel} onChange={e=>set('escalationLevel',+e.target.value)} className={selectCls}>
+            {ESC_LABELS.map((l,i)=><option key={i} value={i+1}>{l}</option>)}
+          </select>
+        </FormField>
+        <div className="sm:col-span-2">
+          <FormField label="Escalation Email (Top Management)">
+            <input type="email" value={form.escalationEmail} onChange={e=>set('escalationEmail',e.target.value)} placeholder="ceo@company.com" className={inputCls} />
+          </FormField>
+        </div>
+      </div>
+      <div className="flex gap-3 mt-6 pt-4 border-t border-gray-100 dark:border-gray-700">
+        <button onClick={onClose} className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:bg-gray-700':'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>Cancel</button>
+        <button onClick={save} disabled={saving||!form.title||!form.plantId||!form.dueDate}
+          className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+          {saving?'Saving…':initial?'Update':'Add Requirement'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN – REQUIREMENTS
+═══════════════════════════════════════════ */
+function AdminRequirements({ dk, plants, users, requirements, updateRequirements }) {
+  const [filters, setFilters]   = useState({ plant:'', status:'', priority:'', search:'' });
+  const [showAdd, setShowAdd]   = useState(false);
+  const [editReq, setEditReq]   = useState(null);
+  const [viewReq, setViewReq]   = useState(null);
+  const [delId,   setDelId]     = useState(null);
+
+  const set = (k,v) => setFilters(f=>({...f,[k]:v}));
+
+  const filtered = requirements.filter(r => {
+    if (filters.plant  && r.plantId  !== filters.plant)   return false;
+    if (filters.status && r.status   !== filters.status)  return false;
+    if (filters.priority&&r.priority!==filters.priority)  return false;
+    if (filters.search && !r.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    return true;
+  });
+
+  const addReq = form => {
+    const newR = { ...form, id:`r${Date.now()}`, createdAt:new Date().toISOString(), evidence:[], comments:[] };
+    updateRequirements([newR, ...requirements]);
+  };
+  const saveEdit = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
+  const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
+
+  const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = dk?'text-gray-400':'text-gray-500';
+
+  return (
+    <div className="space-y-5">
+      <ConfirmModal open={!!delId} message="Delete this requirement permanently?" onConfirm={confirmDel} onCancel={()=>setDelId(null)} />
+      <RequirementModal open={showAdd} onClose={()=>setShowAdd(false)} onSave={addReq} plants={plants} users={users} dk={dk} />
+      <RequirementModal open={!!editReq} onClose={()=>setEditReq(null)} onSave={saveEdit} initial={editReq} plants={plants} users={users} dk={dk} />
+
+      <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide>
+        {viewReq && (() => {
+          const plant = plants.find(p=>p.id===viewReq.plantId);
+          const assignee = users.find(u=>u.id===viewReq.assignedTo);
+          return (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Badge label={viewReq.status} color={STATUS_CLR[viewReq.status]} />
+                <Badge label={viewReq.priority} color={PRIORITY_CLR[viewReq.priority]} />
+                <Badge label={viewReq.category} color="#6366f1" />
+                <Badge label={`L${viewReq.escalationLevel} Escalation`} color="#8b5cf6" />
+              </div>
+              <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{viewReq.description}</p>
+              <div className="grid grid-cols-2 gap-4">
+                {[['Plant',plant?.name],['State',plant?.state],['Assigned To',assignee?`${assignee.name} (${assignee.email})`:'Unassigned'],['Due Date',formatDate(viewReq.dueDate)],['Reminder',viewReq.reminderFrequency],['Escalation Email',viewReq.escalationEmail||'—']].map(([l,v])=>(
+                  <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                    <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${sub}`}>{l}</p>
+                    <p className="font-medium text-gray-800 dark:text-white">{v||'—'}</p>
+                  </div>
+                ))}
+              </div>
+              {viewReq.evidence?.length > 0 && (
+                <div>
+                  <p className="font-semibold mb-2">📎 Evidence</p>
+                  {viewReq.evidence.map(e=>(
+                    <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                      <span className="text-xl">📄</span>
+                      <div><p className="text-sm font-medium">{e.name}</p><p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
+
+      <div className={`${card} p-4`}>
+        <div className="flex flex-wrap gap-3 items-center">
+          <input value={filters.search} onChange={e=>set('search',e.target.value)} placeholder="🔍 Search requirements…"
+            className={`${inputCls} max-w-xs`} />
+          <select value={filters.plant} onChange={e=>set('plant',e.target.value)} className={`${selectCls} w-44`}>
+            <option value="">All Plants</option>
+            {plants.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select value={filters.status} onChange={e=>set('status',e.target.value)} className={`${selectCls} w-36`}>
+            <option value="">All Status</option>
+            {STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+          <select value={filters.priority} onChange={e=>set('priority',e.target.value)} className={`${selectCls} w-36`}>
+            <option value="">All Priority</option>
+            {PRIORITIES.map(p=><option key={p}>{p}</option>)}
+          </select>
+          <button onClick={()=>setShowAdd(true)}
+            className="ml-auto px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-md shadow-indigo-200">
+            <span>+</span> Add Requirement
+          </button>
+        </div>
+        <p className={`text-xs mt-2 ${sub}`}>Showing {filtered.length} of {requirements.length} requirements</p>
+      </div>
+
+      <div className={`${card} overflow-hidden`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className={`text-xs uppercase tracking-wide font-semibold ${dk?'bg-gray-700/60 text-gray-400':'bg-gray-50 text-gray-500'}`}>
+                {['Requirement','Plant','Category','Assigned To','Priority','Status','Due Date','Actions'].map(h=>(
+                  <th key={h} className="text-left px-4 py-3 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className={`divide-y ${dk?'divide-gray-700':'divide-gray-100'}`}>
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">No requirements found</td></tr>
+              )}
+              {filtered.map(req => {
+                const plant    = plants.find(p=>p.id===req.plantId);
+                const assignee = users.find(u=>u.id===req.assignedTo);
+                const dl       = daysLeft(req.dueDate);
+                return (
+                  <tr key={req.id} className={`transition-colors ${dk?'hover:bg-gray-700/50':'hover:bg-slate-50'}`}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium max-w-[200px] truncate" title={req.title}>{req.title}</p>
+                      {req.evidence?.length>0 && <span className={`text-xs ${sub}`}>📎 {req.evidence.length} file(s)</span>}
+                    </td>
+                    <td className={`px-4 py-3 whitespace-nowrap ${sub}`}>{plant?.name}</td>
+                    <td className={`px-4 py-3 whitespace-nowrap ${sub}`}>{req.category}</td>
+                    <td className="px-4 py-3">
+                      {assignee ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(assignee.name)}</div>
+                          <span className={`text-xs ${sub} truncate max-w-[100px]`}>{assignee.name}</span>
+                        </div>
+                      ) : <span className="text-xs text-red-400">Unassigned</span>}
+                    </td>
+                    <td className="px-4 py-3"><Badge label={req.priority} color={PRIORITY_CLR[req.priority]} /></td>
+                    <td className="px-4 py-3"><Badge label={req.status}   color={STATUS_CLR[req.status]} /></td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <p className={`text-xs ${dl<0?'text-red-500':dl<7?'text-amber-500':sub}`}>{formatDate(req.dueDate)}</p>
+                      {dl<0 && <p className="text-xs text-red-400">{Math.abs(dl)}d overdue</p>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button onClick={()=>setViewReq(req)} className={`p-1.5 rounded-lg text-xs hover:bg-indigo-100 hover:text-indigo-600 transition-colors ${sub}`} title="View">👁️</button>
+                        <button onClick={()=>setEditReq(req)} className={`p-1.5 rounded-lg text-xs hover:bg-amber-100 hover:text-amber-600 transition-colors ${sub}`} title="Edit">✏️</button>
+                        <button onClick={()=>setDelId(req.id)} className={`p-1.5 rounded-lg text-xs hover:bg-red-100 hover:text-red-600 transition-colors ${sub}`} title="Delete">🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN – USERS
+═══════════════════════════════════════════ */
+function AdminUsers({ dk, plants, users, updateUsers }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editU,   setEditU]   = useState(null);
+  const [delId,   setDelId]   = useState(null);
+  const [search,  setSearch]  = useState('');
+
+  const blank = { name:'', email:'', password:'', role:'user', plantId:'', dept:'', phone:'' };
+  const [form, setForm] = useState(blank);
+  const [saving, setSaving] = useState(false);
+
+  const openAdd = () => { setForm(blank); setShowAdd(true); };
+  const openEdit= u  => { setForm({...u}); setEditU(u); setShowAdd(true); };
+  const set     = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const save = async () => {
+    if (!form.name||!form.email||!form.password) return;
+    setSaving(true);
+    await new Promise(r=>setTimeout(r,400));
+    if (editU) { updateUsers(users.map(u=>u.id===editU.id?{...u,...form}:u)); }
+    else       { updateUsers([...users, {...form, id:`u${Date.now()}`}]); }
+    setSaving(false); setShowAdd(false); setEditU(null);
+  };
+  const confirmDel = () => { updateUsers(users.filter(u=>u.id!==delId)); setDelId(null); };
+
+  const filtered = users.filter(u=>u.name.toLowerCase().includes(search.toLowerCase())||u.email.toLowerCase().includes(search.toLowerCase()));
+  const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = dk?'text-gray-400':'text-gray-500';
+  const roleBg = { admin:'bg-indigo-100 text-indigo-700', plant_head:'bg-teal-100 text-teal-700', user:'bg-green-100 text-green-700' };
+
+  return (
+    <div className="space-y-5">
+      <ConfirmModal open={!!delId} message="Delete this user account?" onConfirm={confirmDel} onCancel={()=>setDelId(null)} />
+
+      <Modal open={showAdd} onClose={()=>{setShowAdd(false);setEditU(null);}} title={editU?'Edit User':'Add New User'}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="Full Name" required><input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Full name" className={inputCls} /></FormField>
+            <FormField label="Email" required><input type="email" value={form.email} onChange={e=>set('email',e.target.value)} placeholder="email@company.com" className={inputCls} /></FormField>
+            <FormField label="Password" required><input type="password" value={form.password} onChange={e=>set('password',e.target.value)} placeholder="Min 8 characters" className={inputCls} /></FormField>
+            <FormField label="Phone"><input value={form.phone} onChange={e=>set('phone',e.target.value)} placeholder="+91-XXXXXXXXXX" className={inputCls} /></FormField>
+            <FormField label="Role" required>
+              <select value={form.role} onChange={e=>set('role',e.target.value)} className={selectCls}>
+                <option value="user">Team Member</option>
+                <option value="plant_head">Plant Head</option>
+                <option value="admin">Admin</option>
+              </select>
+            </FormField>
+            <FormField label="Plant">
+              <select value={form.plantId} onChange={e=>set('plantId',e.target.value)} className={selectCls} disabled={form.role==='admin'}>
+                <option value="">— None —</option>
+                {plants.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </FormField>
+            <div className="col-span-2">
+              <FormField label="Department"><input value={form.dept} onChange={e=>set('dept',e.target.value)} placeholder="EHS, Legal, Compliance…" className={inputCls} /></FormField>
+            </div>
+          </div>
+          <div className="flex gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
+            <button onClick={()=>{setShowAdd(false);setEditU(null);}} className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:bg-gray-700':'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>Cancel</button>
+            <button onClick={save} disabled={saving||!form.name||!form.email||!form.password}
+              className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+              {saving?'Saving…':editU?'Update User':'Add User'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <div className={`${card} p-4 flex items-center gap-3`}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search users…" className={`${inputCls} max-w-xs`} />
+        <button onClick={openAdd} className="ml-auto px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-md shadow-indigo-200">
+          <span>+</span> Add User
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filtered.map(u=>{
+          const plant = plants.find(p=>p.id===u.plantId);
+          return (
+            <div key={u.id} className={`${card} p-5`}>
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold">{initials(u.name)}</div>
+                  <div>
+                    <p className="font-semibold text-sm">{u.name}</p>
+                    <p className={`text-xs ${sub}`}>{u.email}</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${roleBg[u.role]}`}>
+                  {{admin:'Admin',plant_head:'Head',user:'Member'}[u.role]}
+                </span>
+              </div>
+              <div className="space-y-1.5 mb-4">
+                {[['🏭',plant?.name||'Group Level'],['🏢',u.dept||'—'],['📱',u.phone||'—']].map(([i,v])=>(
+                  <p key={i} className={`text-xs ${sub} flex items-center gap-2`}><span>{i}</span>{v}</p>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={()=>openEdit(u)} className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors ${dk?'border-gray-600 hover:bg-gray-700':'border-gray-200 hover:bg-gray-50'}`}>Edit</button>
+                <button onClick={()=>setDelId(u.id)} className="flex-1 py-2 rounded-xl text-xs font-medium bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors">Delete</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN – PLANTS
+═══════════════════════════════════════════ */
+function AdminPlants({ dk, plants, updatePlants }) {
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({});
+
+  const startEdit = p => { setEditing(p.id); setForm({ name:p.name, state:p.state }); };
+  const saveEdit  = id => {
+    if (!form.name.trim()) return;
+    updatePlants(plants.map(p=>p.id===id?{...p,...form}:p));
+    setEditing(null);
+  };
+
+  const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = dk?'text-gray-400':'text-gray-500';
+
+  return (
+    <div className="space-y-5">
+      <div className={`${card} p-4`}>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          🏭 Manage all 12 plant locations. Click <strong>Edit</strong> to update plant names and associated states.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {plants.map((plant, idx) => (
+          <div key={plant.id} className={`${card} p-5`}>
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white font-bold text-sm">
+                  {String.fromCharCode(65+idx)}
+                </div>
+                <div>
+                  <p className={`text-xs font-semibold ${sub} uppercase tracking-wide`}>Plant {String.fromCharCode(65+idx)}</p>
+                  <p className="font-semibold text-sm">{plant.name}</p>
+                </div>
+              </div>
+              <button onClick={()=>startEdit(plant)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors border border-indigo-100">
+                ✏️ Edit
+              </button>
+            </div>
+            <p className={`text-xs flex items-center gap-1.5 mb-4 ${sub}`}><span>📍</span>{plant.state}</p>
+
+            {editing === plant.id && (
+              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-3">
+                <div>
+                  <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>Plant Name</label>
+                  <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} className={inputCls} placeholder="Plant name" />
+                </div>
+                <div>
+                  <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>State</label>
+                  <select value={form.state} onChange={e=>setForm(f=>({...f,state:e.target.value}))} className={selectCls}>
+                    {IND_STATES.map(s=><option key={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setEditing(null)} className={`flex-1 py-2 rounded-xl text-xs border transition-colors ${dk?'border-gray-600 hover:bg-gray-700 text-gray-300':'border-gray-200 hover:bg-gray-50 text-gray-700'}`}>Cancel</button>
+                  <button onClick={()=>saveEdit(plant.id)} className="flex-1 py-2 rounded-xl text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-colors font-medium">Save</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN – SETTINGS
+═══════════════════════════════════════════ */
+function AdminSettings({ dk }) {
+  const [settings, setSettings] = useState({
+    escalation1: 'planthead@legalcomp.com',
+    escalation2: 'regional@legalcomp.com',
+    escalation3: 'ceo@legalcomp.com',
+    defaultReminder: 'Weekly',
+    overdueAlert: true,
+    autoEscalate: true,
+    escalateDays: 7,
+    smtpHost: 'smtp.gmail.com',
+    smtpPort: '587',
+    fromEmail: 'compliance@legalcomp.com',
+    toast: false,
+  });
+  const set = (k,v) => setSettings(s=>({...s,[k]:v}));
+  const save = () => setSettings(s=>({...s,toast:true}));
+  useEffect(()=>{ if(settings.toast) setTimeout(()=>set('toast',false),3000); },[settings.toast]);
+
+  const card = `rounded-2xl border shadow-sm p-6 ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = dk?'text-gray-400':'text-gray-500';
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      {settings.toast && (
+        <div className="fixed top-6 right-6 z-50 bg-green-500 text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium">✅ Settings saved successfully!</div>
+      )}
+
+      <div className={card}>
+        <h3 className="font-semibold mb-4 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+          <span>📧</span> Escalation Email Configuration
+        </h3>
+        <div className="space-y-4">
+          {[['Level 1 – Plant Head','escalation1'],['Level 2 – Regional Manager','escalation2'],['Level 3 – Top Management / CEO','escalation3']].map(([label,key])=>(
+            <div key={key} className="flex items-center gap-4">
+              <div className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 w-52 ${key==='escalation3'?'bg-red-100 text-red-700':key==='escalation2'?'bg-amber-100 text-amber-700':'bg-blue-100 text-blue-700'}`}>{label}</div>
+              <input value={settings[key]} onChange={e=>set(key,e.target.value)} type="email" placeholder="email@company.com" className={inputCls} />
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-400">
+          ⚡ Escalation emails are triggered automatically when a task becomes overdue beyond the threshold.
+        </div>
+      </div>
+
+      <div className={card}>
+        <h3 className="font-semibold mb-4 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+          <span>🔔</span> Reminder & Alert Settings
+        </h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700">
+            <div><p className="text-sm font-medium">Default Reminder Frequency</p><p className={`text-xs ${sub}`}>Applied to new requirements</p></div>
+            <select value={settings.defaultReminder} onChange={e=>set('defaultReminder',e.target.value)} className={`${selectCls} w-36`}>
+              {REM_FREQS.map(r=><option key={r}>{r}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700">
+            <div><p className="text-sm font-medium">Auto-escalate overdue tasks</p><p className={`text-xs ${sub}`}>Notify management automatically</p></div>
+            <button onClick={()=>set('autoEscalate',!settings.autoEscalate)}
+              className={`w-12 h-6 rounded-full transition-colors relative ${settings.autoEscalate?'bg-indigo-600':'bg-gray-300'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.autoEscalate?'left-6':'left-0.5'}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700">
+            <div><p className="text-sm font-medium">Overdue threshold (days)</p><p className={`text-xs ${sub}`}>Days after due date to escalate</p></div>
+            <input type="number" value={settings.escalateDays} onChange={e=>set('escalateDays',e.target.value)} min={1} max={30}
+              className={`${inputCls} w-24 text-center`} />
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700">
+            <div><p className="text-sm font-medium">Overdue alerts to admin</p><p className={`text-xs ${sub}`}>Daily digest of overdue items</p></div>
+            <button onClick={()=>set('overdueAlert',!settings.overdueAlert)}
+              className={`w-12 h-6 rounded-full transition-colors relative ${settings.overdueAlert?'bg-indigo-600':'bg-gray-300'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.overdueAlert?'left-6':'left-0.5'}`} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className={card}>
+        <h3 className="font-semibold mb-4 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+          <span>📮</span> SMTP / Email Server
+        </h3>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="SMTP Host"><input value={settings.smtpHost} onChange={e=>set('smtpHost',e.target.value)} className={inputCls} /></FormField>
+          <FormField label="Port"><input value={settings.smtpPort} onChange={e=>set('smtpPort',e.target.value)} className={inputCls} /></FormField>
+          <div className="col-span-2">
+            <FormField label="From Email"><input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} /></FormField>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={save} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+        💾 Save All Settings
+      </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN DASHBOARD
+═══════════════════════════════════════════ */
+function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updatePlants, updateUsers, updateRequirements, logout }) {
+  const [activePage, setActivePage] = useState('overview');
+  const overdueCount = requirements.filter(r=>r.status==='Overdue').length;
+
+  const nav = [
+    { id:'overview',     icon:'📊', label:'Overview' },
+    { id:'requirements', icon:'📋', label:'Requirements', badge:overdueCount },
+    { id:'users',        icon:'👥', label:'Users' },
+    { id:'plants',       icon:'🏭', label:'Plants' },
+    { id:'settings',     icon:'⚙️', label:'Settings' },
+  ];
+
+  const pages = {
+    overview:     <AdminOverview dk={dk} plants={plants} users={users} requirements={requirements} />,
+    requirements: <AdminRequirements dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} />,
+    users:        <AdminUsers dk={dk} plants={plants} users={users} updateUsers={updateUsers} />,
+    plants:       <AdminPlants dk={dk} plants={plants} updatePlants={updatePlants} />,
+    settings:     <AdminSettings dk={dk} />,
+  };
+
+  return (
+    <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
+      activePage={activePage} setActivePage={setActivePage} role="admin" logout={logout}>
+      {pages[activePage]}
+    </AppShell>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   PLANT HEAD DASHBOARD
+═══════════════════════════════════════════ */
+function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updateRequirements, logout }) {
+  const [activePage, setActivePage] = useState('overview');
+  const myPlant   = plants.find(p=>p.id===currentUser.plantId);
+  const myReqs    = requirements.filter(r=>r.plantId===currentUser.plantId);
+  const overdueCount = myReqs.filter(r=>r.status==='Overdue').length;
+
+  const nav = [
+    { id:'overview',     icon:'📊', label:'Plant Overview' },
+    { id:'requirements', icon:'📋', label:'Requirements', badge:overdueCount },
+    { id:'team',         icon:'👥', label:'My Team' },
+  ];
+
+  const total     = myReqs.length;
+  const completed = myReqs.filter(r=>r.status==='Completed').length;
+  const overdue   = myReqs.filter(r=>r.status==='Overdue').length;
+  const card      = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub       = dk?'text-gray-400':'text-gray-500';
+  const TT        = { contentStyle:{ background:dk?'#1f2937':'white', border:'none', borderRadius:10, fontSize:12 } };
+
+  const statusPie = STATUSES.map(s=>({ name:s, value:myReqs.filter(r=>r.status===s).length }));
+  const teamUsers = users.filter(u=>u.plantId===currentUser.plantId&&u.role==='user');
+  const teamBar   = teamUsers.map(u=>({ name:u.name.split(' ')[0], Total:myReqs.filter(r=>r.assignedTo===u.id).length, Done:myReqs.filter(r=>r.assignedTo===u.id&&r.status==='Completed').length }));
+
+  const Overview = () => (
+    <div className="space-y-5">
+      <div className={`p-4 rounded-2xl border ${dk?'bg-indigo-900/30 border-indigo-700':'bg-indigo-50 border-indigo-100'}`}>
+        <p className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">🏭 {myPlant?.name} — {myPlant?.state}</p>
+        <p className={`text-xs mt-0.5 ${sub}`}>Your plant compliance dashboard · {new Date().toLocaleDateString('en-IN',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+      </div>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <StatCard dk={dk} label="Total Requirements" value={total} icon="📋" color="bg-indigo-100 text-indigo-600" sub={myPlant?.name} />
+        <StatCard dk={dk} label="Compliance Rate"    value={total?`${Math.round(completed/total*100)}%`:'—'} icon="✅" color="bg-green-100 text-green-600" sub={`${completed} completed`} />
+        <StatCard dk={dk} label="Overdue"            value={overdue} icon="🚨" color="bg-red-100 text-red-600" sub="Needs attention" />
+        <StatCard dk={dk} label="Team Members"       value={teamUsers.length} icon="👥" color="bg-purple-100 text-purple-600" sub="Assigned users" />
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className={card}>
+          <h3 className="font-semibold mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>Status Distribution</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie data={statusPie} cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={3} dataKey="value"
+                label={({name,value})=>value>0?`${name}:${value}`:''} labelLine={false} fontSize={10}>
+                {statusPie.map((e,i)=><Cell key={i} fill={Object.values(STATUS_CLR)[i]} />)}
+              </Pie>
+              <Tooltip {...TT} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className={card}>
+          <h3 className="font-semibold mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>Team Workload</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={teamBar} barSize={20}>
+              <CartesianGrid strokeDasharray="3 3" stroke={dk?'#374151':'#f1f5f9'} vertical={false}/>
+              <XAxis dataKey="name" tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false}/>
+              <YAxis tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false}/>
+              <Tooltip {...TT} />
+              <Bar dataKey="Total" fill="#6366f130" radius={[4,4,0,0]}/>
+              <Bar dataKey="Done"  fill="#22c55e"   radius={[4,4,0,0]}/>
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:12}} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      {overdue > 0 && (
+        <div className={card}>
+          <h3 className="font-semibold mb-3 text-red-500">🚨 Overdue in {myPlant?.name}</h3>
+          <div className="space-y-2">
+            {myReqs.filter(r=>r.status==='Overdue').map(r=>{
+              const a = users.find(u=>u.id===r.assignedTo);
+              return (
+                <div key={r.id} className={`flex items-center justify-between p-3 rounded-xl ${dk?'bg-red-900/20 border border-red-800/30':'bg-red-50 border border-red-100'}`}>
+                  <div>
+                    <p className="text-sm font-medium text-red-600">{r.title}</p>
+                    <p className={`text-xs ${sub}`}>Assigned: {a?.name||'Unassigned'} · Due: {formatDate(r.dueDate)}</p>
+                  </div>
+                  <Badge label={`L${r.escalationLevel}`} color="#8b5cf6" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const PHRequirements = () => {
+    const [filter, setFilter] = useState('');
+    const filtered = myReqs.filter(r=>!filter||r.status===filter);
+    return (
+      <div className="space-y-4">
+        <div className={`${card} p-4 flex gap-3`}>
+          <select value={filter} onChange={e=>setFilter(e.target.value)} className={`${selectCls} w-40`}>
+            <option value="">All Status</option>
+            {STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+          <p className={`text-xs self-center ${sub}`}>{filtered.length} requirements</p>
+        </div>
+        <div className={`${card} overflow-hidden`}>
+          <table className="w-full text-sm">
+            <thead className={`text-xs uppercase tracking-wide font-semibold ${dk?'bg-gray-700/60 text-gray-400':'bg-gray-50 text-gray-500'}`}>
+              <tr>{['Title','Category','Assigned To','Priority','Status','Due Date'].map(h=><th key={h} className="text-left px-4 py-3">{h}</th>)}</tr>
+            </thead>
+            <tbody className={`divide-y ${dk?'divide-gray-700':'divide-gray-100'}`}>
+              {filtered.map(r=>{
+                const a=users.find(u=>u.id===r.assignedTo); const dl=daysLeft(r.dueDate);
+                return (
+                  <tr key={r.id} className={dk?'hover:bg-gray-700/40':'hover:bg-slate-50'}>
+                    <td className="px-4 py-3 font-medium max-w-[220px] truncate">{r.title}</td>
+                    <td className={`px-4 py-3 text-xs ${sub}`}>{r.category}</td>
+                    <td className="px-4 py-3 text-xs">{a?<div className="flex items-center gap-1.5"><div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(a.name)}</div>{a.name}</div>:<span className="text-red-400">Unassigned</span>}</td>
+                    <td className="px-4 py-3"><Badge label={r.priority} color={PRIORITY_CLR[r.priority]} /></td>
+                    <td className="px-4 py-3"><Badge label={r.status}   color={STATUS_CLR[r.status]}   /></td>
+                    <td className={`px-4 py-3 text-xs ${dl<0?'text-red-500':dl<7?'text-amber-500':sub}`}>{formatDate(r.dueDate)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const Team = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {teamUsers.map(u=>{
+        const assigned  = myReqs.filter(r=>r.assignedTo===u.id).length;
+        const done      = myReqs.filter(r=>r.assignedTo===u.id&&r.status==='Completed').length;
+        return (
+          <div key={u.id} className={`${card} p-5`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-11 h-11 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold">{initials(u.name)}</div>
+              <div><p className="font-semibold text-sm">{u.name}</p><p className={`text-xs ${sub}`}>{u.dept}</p></div>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between"><span className={sub}>Assigned</span><span className="font-semibold">{assigned}</span></div>
+              <div className="flex justify-between"><span className={sub}>Completed</span><span className="font-semibold text-green-500">{done}</span></div>
+              <div className="flex justify-between"><span className={sub}>Compliance</span><span className="font-semibold">{assigned?Math.round(done/assigned*100):0}%</span></div>
+              <div className={`h-1.5 rounded-full ${dk?'bg-gray-700':'bg-gray-100'} mt-2`}>
+                <div className="h-full rounded-full bg-indigo-500 transition-all" style={{width:`${assigned?Math.round(done/assigned*100):0}%`}} />
+              </div>
+            </div>
+            <p className={`text-xs mt-3 ${sub}`}>📧 {u.email}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const pages = { overview:<Overview/>, requirements:<PHRequirements/>, team:<Team/> };
+  return (
+    <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
+      activePage={activePage} setActivePage={setActivePage} role="plant_head" logout={logout}>
+      {pages[activePage]}
+    </AppShell>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   USER DASHBOARD
+═══════════════════════════════════════════ */
+function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updateRequirements, logout }) {
+  const [activePage, setActivePage] = useState('tasks');
+  const myReqs    = requirements.filter(r=>r.assignedTo===currentUser.id);
+  const myPlant   = plants.find(p=>p.id===currentUser.plantId);
+  const overdueCount = myReqs.filter(r=>r.status==='Overdue').length;
+
+  const nav = [
+    { id:'tasks',   icon:'📋', label:'My Tasks', badge:overdueCount },
+    { id:'profile', icon:'👤', label:'Profile' },
+  ];
+
+  const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = dk?'text-gray-400':'text-gray-500';
+
+  const [selReq, setSelReq] = useState(null);
+  const [comment, setComment] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
+
+  const updateStatus = (id, status) => {
+    updateRequirements(requirements.map(r=>r.id===id?{...r,status}:r));
+    if (selReq?.id===id) setSelReq(sr=>({...sr,status}));
+  };
+
+  const addComment = (reqId) => {
+    if (!comment.trim()) return;
+    const c = { id:`c${Date.now()}`, text:comment, userId:currentUser.id, createdAt:new Date().toISOString() };
+    const updated = requirements.map(r=>r.id===reqId?{...r,comments:[...(r.comments||[]),c]}:r);
+    updateRequirements(updated);
+    setSelReq(sr=>({...sr,comments:[...(sr.comments||[]),c]}));
+    setComment('');
+  };
+
+  const uploadEvidence = async (reqId, file) => {
+    setUploading(true);
+    await new Promise(r=>setTimeout(r,800));
+    const ev = { id:`ev${Date.now()}`, name:file.name, size:`${Math.round(file.size/1024)} KB`, uploadedAt:new Date().toISOString(), uploadedBy:currentUser.id };
+    const updated = requirements.map(r=>r.id===reqId?{...r,evidence:[...(r.evidence||[]),ev]}:r);
+    updateRequirements(updated);
+    setSelReq(sr=>({...sr,evidence:[...(sr.evidence||[]),ev]}));
+    setUploading(false);
+  };
+
+  const Tasks = () => {
+    const statusPie = STATUSES.map(s=>({ name:s, value:myReqs.filter(r=>r.status===s).length }));
+    const total=myReqs.length, done=myReqs.filter(r=>r.status==='Completed').length;
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+          <StatCard dk={dk} label="My Tasks"    value={total} icon="📋" color="bg-indigo-100 text-indigo-600" sub={myPlant?.name} />
+          <StatCard dk={dk} label="Completed"   value={done}  icon="✅" color="bg-green-100 text-green-600"  sub={`${total?Math.round(done/total*100):0}% done`} />
+          <StatCard dk={dk} label="Pending"     value={myReqs.filter(r=>r.status==='Pending').length}     icon="⏳" color="bg-amber-100 text-amber-600" />
+          <StatCard dk={dk} label="Overdue"     value={myReqs.filter(r=>r.status==='Overdue').length}     icon="🚨" color="bg-red-100 text-red-600" sub="Action needed" />
+        </div>
+
+        <Modal open={!!selReq} onClose={()=>setSelReq(null)} title={selReq?.title} wide>
+          {selReq && (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Badge label={selReq.status}   color={STATUS_CLR[selReq.status]}  />
+                <Badge label={selReq.priority}  color={PRIORITY_CLR[selReq.priority]} />
+                <Badge label={selReq.category}  color="#6366f1" />
+                <Badge label={`L${selReq.escalationLevel} Escalation`} color="#8b5cf6" />
+              </div>
+              <p className="text-gray-600 dark:text-gray-400 leading-relaxed">{selReq.description}</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[['📅 Due Date',formatDate(selReq.dueDate)],['🔔 Reminder',selReq.reminderFrequency],['🏭 Plant',myPlant?.name||'—'],['📧 Escalation',selReq.escalationEmail||'—']].map(([l,v])=>(
+                  <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                    <p className={`text-xs ${sub} mb-0.5`}>{l}</p>
+                    <p className="font-medium text-xs">{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <p className="font-semibold mb-2 text-xs uppercase tracking-wide text-gray-500">Update Status</p>
+                <div className="flex flex-wrap gap-2">
+                  {STATUSES.map(s=>(
+                    <button key={s} onClick={()=>updateStatus(selReq.id,s)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all ${selReq.status===s?'border-transparent text-white':'border-gray-200 dark:border-gray-600'}`}
+                      style={selReq.status===s?{background:STATUS_CLR[s]}:{color:STATUS_CLR[s]}}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="font-semibold mb-2 text-xs uppercase tracking-wide text-gray-500">📎 Evidence / Documents</p>
+                {(selReq.evidence||[]).map(e=>(
+                  <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                    <span className="text-xl">📄</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{e.name}</p>
+                      <p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p>
+                    </div>
+                  </div>
+                ))}
+                <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
+                <button onClick={()=>fileRef.current.click()} disabled={uploading}
+                  className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
+                  {uploading?'Uploading…':'📎 Click to Attach Evidence'}
+                </button>
+              </div>
+
+              <div>
+                <p className="font-semibold mb-2 text-xs uppercase tracking-wide text-gray-500">💬 Comments</p>
+                {(selReq.comments||[]).map(c=>{
+                  const u=users.find(x=>x.id===c.userId);
+                  return (
+                    <div key={c.id} className={`p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(u?.name||'?')}</div>
+                        <span className="text-xs font-medium">{u?.name||'Unknown'}</span>
+                        <span className={`text-xs ${sub}`}>{formatDate(c.createdAt)}</span>
+                      </div>
+                      <p className={`text-xs ${sub}`}>{c.text}</p>
+                    </div>
+                  );
+                })}
+                <div className="flex gap-2">
+                  <input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Add a comment…" onKeyDown={e=>e.key==='Enter'&&addComment(selReq.id)}
+                    className={`${inputCls} flex-1 text-xs`} />
+                  <button onClick={()=>addComment(selReq.id)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-medium hover:bg-indigo-700 transition-colors">Send</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </Modal>
+
+        <div className="grid grid-cols-1 gap-3">
+          {myReqs.length === 0 && (
+            <div className={`${card} p-10 text-center`}>
+              <p className="text-4xl mb-3">🎉</p>
+              <p className="font-semibold text-gray-500">No tasks assigned to you yet</p>
+            </div>
+          )}
+          {myReqs.map(req => {
+            const dl = daysLeft(req.dueDate);
+            return (
+              <div key={req.id} className={`${card} p-4 cursor-pointer hover:shadow-md transition-shadow`} onClick={()=>setSelReq(req)}>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-lg" style={{background:STATUS_CLR[req.status]+'22'}}>
+                    {req.status==='Completed'?'✅':req.status==='Overdue'?'🚨':req.status==='In Progress'?'⏳':'📋'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-sm truncate">{req.title}</p>
+                      <Badge label={req.status} color={STATUS_CLR[req.status]} />
+                    </div>
+                    <p className={`text-xs ${sub} mt-0.5 truncate`}>{req.description}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <Badge label={req.priority} color={PRIORITY_CLR[req.priority]} />
+                      <Badge label={req.category}  color="#6366f1" />
+                      <span className={`text-xs ${dl<0?'text-red-500':dl<7?'text-amber-500':sub}`}>📅 {formatDate(req.dueDate)} {dl<0?`(${Math.abs(dl)}d overdue)`:dl<7?`(${dl}d left)`:''}</span>
+                      {(req.evidence||[]).length>0 && <span className={`text-xs ${sub}`}>📎 {req.evidence.length}</span>}
+                      {(req.comments||[]).length>0 && <span className={`text-xs ${sub}`}>💬 {req.comments.length}</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const Profile = () => (
+    <div className="max-w-lg space-y-4">
+      <div className={`${card} p-6 text-center`}>
+        <div className="w-20 h-20 rounded-2xl bg-indigo-600 flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4">{initials(currentUser.name)}</div>
+        <h2 className="text-lg font-bold" style={{fontFamily:"'Outfit',sans-serif"}}>{currentUser.name}</h2>
+        <p className={`text-sm ${sub}`}>{currentUser.email}</p>
+        <span className="inline-block mt-2 px-3 py-1 bg-green-100 text-green-700 text-xs rounded-full font-semibold">Team Member</span>
+      </div>
+      <div className={`${card} p-5 space-y-3`}>
+        {[['🏭','Plant',myPlant?.name||'—'],['📍','State',myPlant?.state||'—'],['🏢','Department',currentUser.dept||'—'],['📱','Phone',currentUser.phone||'—'],['📋','Assigned Tasks',myReqs.length],['✅','Completed',myReqs.filter(r=>r.status==='Completed').length]].map(([i,l,v])=>(
+          <div key={l} className={`flex items-center justify-between py-2 border-b ${dk?'border-gray-700':'border-gray-100'} last:border-0`}>
+            <span className={`text-sm ${sub} flex items-center gap-2`}><span>{i}</span>{l}</span>
+            <span className="text-sm font-semibold">{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const pages = { tasks:<Tasks/>, profile:<Profile/> };
+  return (
+    <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
+      activePage={activePage} setActivePage={setActivePage} role="user" logout={logout}>
+      {pages[activePage]}
+    </AppShell>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   ROOT APP
+═══════════════════════════════════════════ */
+function App() {
+  const [theme,        setTheme]        = useState('light');
+  const [currentUser,  setCurrentUser]  = useState(null);
+  const [page,         setPage]         = useState('login');
+  const [plants,       setPlants]       = useState(mkPlants);
+  const [users,        setUsers]        = useState(mkUsers);
+  const [requirements, setRequirements] = useState(null);
+  const [ready,        setReady]        = useState(false);
+
+  useEffect(() => {
+    try {
+      const t = storage.get('theme');        if (t) setTheme(t.value);
+      const p = storage.get('plants');       if (p) setPlants(JSON.parse(p.value));
+      const u = storage.get('users');        if (u) setUsers(JSON.parse(u.value));
+      const r = storage.get('requirements'); if (r) setRequirements(JSON.parse(r.value));
+    } catch(_) {}
+    setReady(true);
+  }, []);
+
+  useEffect(() => { if (ready && requirements === null) setRequirements(mkRequirements(plants, users)); }, [ready]);
+
+  const persist    = (key, val) => { try { storage.set(key, JSON.stringify(val)); } catch(_) {} };
+  const persistStr = (key, val) => { try { storage.set(key, val); } catch(_) {} };
+
+  const updatePlants       = p => { setPlants(p);       persist('plants', p); };
+  const updateUsers        = u => { setUsers(u);         persist('users', u); };
+  const updateRequirements = r => { setRequirements(r); persist('requirements', r); };
+  const toggleTheme = () => { const t=theme==='light'?'dark':'light'; setTheme(t); persistStr('theme',t); };
+
+  const login = (email, password) => {
+    const u = users.find(x => x.email.toLowerCase()===email.toLowerCase() && x.password===password);
+    if (!u) return false;
+    setCurrentUser(u); setPage(u.role);
+    return true;
+  };
+  const logout = () => { setCurrentUser(null); setPage('login'); };
+
+  const dk = theme === 'dark';
+
+  useEffect(() => {
+    document.body.style.fontFamily = "'DM Sans', sans-serif";
+    document.body.style.background = dk ? '#111827' : '#f8fafc';
+  }, [dk]);
+
+  if (!ready || requirements === null) return (
+    <div className={`flex items-center justify-center h-screen ${dk?'bg-gray-900':'bg-slate-50'}`} style={{fontFamily:"'DM Sans',sans-serif"}}>
+      <div className="text-center">
+        <div className="w-14 h-14 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className={`font-semibold ${dk?'text-white':'text-gray-700'}`} style={{fontFamily:"'Outfit',sans-serif"}}>LegalComp Pro</p>
+        <p className="text-sm text-gray-500 mt-1">Initializing…</p>
+      </div>
+    </div>
+  );
+
+  const ctx = { dk, toggleTheme, currentUser, plants, users, requirements, updatePlants, updateUsers, updateRequirements, logout };
+
+  if (page==='login')      return <LoginPage {...ctx} login={login} />;
+  if (page==='admin')      return <AdminDashboard {...ctx} />;
+  if (page==='plant_head') return <PlantHeadDashboard {...ctx} />;
+  return <UserDashboard {...ctx} />;
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
