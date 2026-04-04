@@ -1080,10 +1080,34 @@ function AdminSettings({ dk }) {
     smtpPort: '587',
     fromEmail: 'compliance@legalcomp.com',
     toast: false,
+    // Firebase
+    fbApiKey: '',
+    fbAuthDomain: '',
+    fbProjectId: '',
+    fbStorageBucket: '',
+    fbMessagingSenderId: '',
+    fbAppId: '',
+    fbMeasurementId: '',
+    fbEnabled: false,
   });
+  const [fbTestStatus, setFbTestStatus] = useState(null); // null | 'testing' | 'success' | 'error'
+  const [fbShowSecret, setFbShowSecret] = useState(false);
+
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
   const save = () => setSettings(s=>({...s,toast:true}));
   useEffect(()=>{ if(settings.toast) setTimeout(()=>set('toast',false),3000); },[settings.toast]);
+
+  const testFirebase = async () => {
+    if (!settings.fbApiKey || !settings.fbProjectId) {
+      setFbTestStatus('error'); setTimeout(()=>setFbTestStatus(null),3500); return;
+    }
+    setFbTestStatus('testing');
+    await new Promise(r=>setTimeout(r,1800));
+    // Simulate connection test — replace with real Firebase SDK init in production
+    const ok = settings.fbApiKey.length > 8 && settings.fbProjectId.length > 3;
+    setFbTestStatus(ok ? 'success' : 'error');
+    setTimeout(()=>setFbTestStatus(null), 4000);
+  };
 
   const card = `rounded-2xl border shadow-sm p-6 ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
   const sub  = dk?'text-gray-400':'text-gray-500';
@@ -1154,6 +1178,121 @@ function AdminSettings({ dk }) {
           <div className="col-span-2">
             <FormField label="From Email"><input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} /></FormField>
           </div>
+        </div>
+      </div>
+
+      <div className={card}>
+        <h3 className="font-semibold mb-1 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+          <span>🔥</span> Firebase Configuration
+        </h3>
+        <p className={`text-xs mb-4 ${sub}`}>Connect your Firebase project for real-time sync, authentication, and cloud storage.</p>
+
+        {/* Enable toggle */}
+        <div className={`flex items-center justify-between p-3 rounded-xl mb-4 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+          <div>
+            <p className="text-sm font-medium">Enable Firebase Integration</p>
+            <p className={`text-xs ${sub}`}>Activate cloud sync &amp; push notifications</p>
+          </div>
+          <button onClick={()=>set('fbEnabled',!settings.fbEnabled)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${settings.fbEnabled?'bg-orange-500':'bg-gray-300'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.fbEnabled?'left-6':'left-0.5'}`} />
+          </button>
+        </div>
+
+        <div className={`space-y-4 transition-opacity ${settings.fbEnabled?'opacity-100':'opacity-50 pointer-events-none'}`}>
+          {/* Row 1 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label="API Key" required>
+              <div className="relative">
+                <input
+                  type={fbShowSecret?'text':'password'}
+                  value={settings.fbApiKey}
+                  onChange={e=>set('fbApiKey',e.target.value)}
+                  placeholder="AIzaSy…"
+                  className={inputCls + ' pr-10'}
+                />
+                <button type="button" onClick={()=>setFbShowSecret(v=>!v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs">
+                  {fbShowSecret?'🙈':'👁️'}
+                </button>
+              </div>
+            </FormField>
+            <FormField label="Auth Domain" required>
+              <input value={settings.fbAuthDomain} onChange={e=>set('fbAuthDomain',e.target.value)}
+                placeholder="your-app.firebaseapp.com" className={inputCls} />
+            </FormField>
+          </div>
+
+          {/* Row 2 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label="Project ID" required>
+              <input value={settings.fbProjectId} onChange={e=>set('fbProjectId',e.target.value)}
+                placeholder="your-project-id" className={inputCls} />
+            </FormField>
+            <FormField label="Storage Bucket">
+              <input value={settings.fbStorageBucket} onChange={e=>set('fbStorageBucket',e.target.value)}
+                placeholder="your-app.appspot.com" className={inputCls} />
+            </FormField>
+          </div>
+
+          {/* Row 3 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField label="Messaging Sender ID">
+              <input value={settings.fbMessagingSenderId} onChange={e=>set('fbMessagingSenderId',e.target.value)}
+                placeholder="1234567890" className={inputCls} />
+            </FormField>
+            <FormField label="App ID" required>
+              <input value={settings.fbAppId} onChange={e=>set('fbAppId',e.target.value)}
+                placeholder="1:123…:web:abc…" className={inputCls} />
+            </FormField>
+          </div>
+
+          {/* Measurement ID (optional) */}
+          <FormField label="Measurement ID (Analytics — optional)">
+            <input value={settings.fbMeasurementId} onChange={e=>set('fbMeasurementId',e.target.value)}
+              placeholder="G-XXXXXXXXXX" className={inputCls} />
+          </FormField>
+
+          {/* Generated config preview */}
+          {settings.fbProjectId && (
+            <div className={`rounded-xl border text-xs font-mono p-4 leading-relaxed overflow-x-auto ${dk?'bg-gray-900 border-gray-600 text-green-400':'bg-gray-900 border-gray-700 text-green-400'}`}>
+              <p className="text-gray-500 mb-1">{'// firebaseConfig'}</p>
+              <p>{'{'}</p>
+              <p className="pl-4">apiKey: <span className="text-yellow-400">"{settings.fbApiKey||'…'}"</span>,</p>
+              <p className="pl-4">authDomain: <span className="text-yellow-400">"{settings.fbAuthDomain||'…'}"</span>,</p>
+              <p className="pl-4">projectId: <span className="text-yellow-400">"{settings.fbProjectId}"</span>,</p>
+              {settings.fbStorageBucket && <p className="pl-4">storageBucket: <span className="text-yellow-400">"{settings.fbStorageBucket}"</span>,</p>}
+              {settings.fbMessagingSenderId && <p className="pl-4">messagingSenderId: <span className="text-yellow-400">"{settings.fbMessagingSenderId}"</span>,</p>}
+              <p className="pl-4">appId: <span className="text-yellow-400">"{settings.fbAppId||'…'}"</span>{settings.fbMeasurementId?',':''}</p>
+              {settings.fbMeasurementId && <p className="pl-4">measurementId: <span className="text-yellow-400">"{settings.fbMeasurementId}"</span></p>}
+              <p>{'}'}</p>
+            </div>
+          )}
+
+          {/* Test connection button + status */}
+          <div className="flex items-center gap-3">
+            <button onClick={testFirebase} disabled={fbTestStatus==='testing'}
+              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center gap-2 ${fbTestStatus==='testing'?'bg-orange-400 text-white cursor-wait':'bg-orange-500 hover:bg-orange-600 text-white'}`}>
+              {fbTestStatus==='testing'
+                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"/>Testing…</>
+                : '🔌 Test Connection'}
+            </button>
+            {fbTestStatus==='success' && (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
+                ✅ Connected successfully
+              </span>
+            )}
+            {fbTestStatus==='error' && (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-red-500">
+                ❌ Connection failed — check your credentials
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className={`mt-4 p-3 rounded-xl text-xs flex items-start gap-2 ${dk?'bg-blue-900/20 border border-blue-800/30 text-blue-300':'bg-blue-50 border border-blue-100 text-blue-700'}`}>
+          <span>ℹ️</span>
+          <span>Find these values in your <strong>Firebase Console → Project Settings → Your apps → Firebase SDK snippet</strong>.</span>
         </div>
       </div>
 
