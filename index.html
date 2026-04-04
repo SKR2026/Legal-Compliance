@@ -391,6 +391,104 @@ function LoginPage({ login }) {
 ═══════════════════════════════════════════ */
 function AdminOverview({ dk, plants, users, requirements }) {
   const [selPlant, setSelPlant] = useState('');
+
+  /* ── Config Status (read from localStorage) ── */
+  const [cfgStatus, setCfgStatus] = useState({ ejsEnabled:false, ejsConfigured:false, fbEnabled:false, fbConfigured:false, ejsToEmail:'', fbProjectId:'' });
+  useEffect(() => {
+    try {
+      const saved = storage.get('adminSettings');
+      if (saved) {
+        const s = JSON.parse(saved.value);
+        setCfgStatus({
+          ejsEnabled:   !!s.ejsEnabled,
+          ejsConfigured: !!(s.ejsPublicKey && s.ejsServiceId && s.ejsTemplateId),
+          fbEnabled:    !!s.fbEnabled,
+          fbConfigured: !!(s.fbApiKey && s.fbProjectId && s.fbAppId),
+          ejsToEmail:   s.ejsToEmail || '',
+          fbProjectId:  s.fbProjectId || '',
+        });
+      }
+    } catch(_) {}
+  }, []);
+
+  const ConfigStatusPanel = () => {
+    const panelBg = dk ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+    const rowBg   = dk ? 'bg-gray-700/50' : 'bg-gray-50';
+    const sub2    = dk ? 'text-gray-400' : 'text-gray-500';
+
+    const StatusDot = ({ on, label, detail }) => (
+      <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${rowBg}`}>
+        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${on ? 'bg-green-500 shadow-sm shadow-green-400' : 'bg-gray-300'}`} />
+        <div className="min-w-0 flex-1">
+          <p className={`text-xs font-semibold ${on ? (dk?'text-white':'text-gray-800') : sub2}`}>{label}</p>
+          {detail && <p className={`text-xs truncate ${sub2}`}>{detail}</p>}
+        </div>
+        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${on ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+          {on ? 'Active' : 'Off'}
+        </span>
+      </div>
+    );
+
+    const ejsOk  = cfgStatus.ejsEnabled && cfgStatus.ejsConfigured;
+    const ejsWarn= cfgStatus.ejsEnabled && !cfgStatus.ejsConfigured;
+    const fbOk   = cfgStatus.fbEnabled  && cfgStatus.fbConfigured;
+    const fbWarn = cfgStatus.fbEnabled  && !cfgStatus.fbConfigured;
+
+    return (
+      <div className={`rounded-2xl border p-5 shadow-sm ${panelBg}`}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+            <span>⚙️</span> Integration Status
+          </h3>
+          <a href="#" onClick={e=>{e.preventDefault();}} className="text-xs text-indigo-400 hover:underline">Configure in Settings →</a>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {/* EmailJS */}
+          <div className={`rounded-xl border p-3 space-y-2 ${ejsOk ? (dk?'border-green-800/40 bg-green-900/10':'border-green-200 bg-green-50') : ejsWarn ? (dk?'border-amber-800/40 bg-amber-900/10':'border-amber-200 bg-amber-50') : (dk?'border-gray-700 bg-gray-700/30':'border-gray-200 bg-gray-50')}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-base">📧</span>
+              <p className={`text-xs font-bold ${ejsOk?'text-green-600':ejsWarn?'text-amber-600':sub2}`}>
+                EmailJS {ejsOk ? '✓ Ready' : ejsWarn ? '⚠ Incomplete' : '— Disabled'}
+              </p>
+            </div>
+            {cfgStatus.ejsEnabled ? (
+              <div className={`text-xs space-y-0.5 ${sub2}`}>
+                <p>{cfgStatus.ejsConfigured ? '✅ Credentials configured' : '❌ Missing Public Key / Service ID / Template ID'}</p>
+                {cfgStatus.ejsToEmail && <p>📬 To: {cfgStatus.ejsToEmail}</p>}
+              </div>
+            ) : (
+              <p className={`text-xs ${sub2}`}>Enable in Settings → Email Delivery</p>
+            )}
+          </div>
+
+          {/* Firebase */}
+          <div className={`rounded-xl border p-3 space-y-2 ${fbOk ? (dk?'border-orange-800/40 bg-orange-900/10':'border-orange-200 bg-orange-50') : fbWarn ? (dk?'border-amber-800/40 bg-amber-900/10':'border-amber-200 bg-amber-50') : (dk?'border-gray-700 bg-gray-700/30':'border-gray-200 bg-gray-50')}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-base">🔥</span>
+              <p className={`text-xs font-bold ${fbOk?'text-orange-600':fbWarn?'text-amber-600':sub2}`}>
+                Firebase {fbOk ? '✓ Ready' : fbWarn ? '⚠ Incomplete' : '— Disabled'}
+              </p>
+            </div>
+            {cfgStatus.fbEnabled ? (
+              <div className={`text-xs space-y-0.5 ${sub2}`}>
+                <p>{cfgStatus.fbConfigured ? '✅ API Key + Project + App ID set' : '❌ Missing API Key / Project ID / App ID'}</p>
+                {cfgStatus.fbProjectId && <p>🗂️ Project: {cfgStatus.fbProjectId}</p>}
+              </div>
+            ) : (
+              <p className={`text-xs ${sub2}`}>Enable in Settings → Firebase Configuration</p>
+            )}
+          </div>
+        </div>
+
+        {/* Quick hint if both are off */}
+        {!cfgStatus.ejsEnabled && !cfgStatus.fbEnabled && (
+          <p className={`text-xs mt-3 text-center ${sub2}`}>
+            💡 Go to <strong>Settings</strong> to configure email delivery and Firebase integration.
+          </p>
+        )}
+      </div>
+    );
+  };
   const [drillModal, setDrillModal] = useState(null);
 
   const scopedReqs = selPlant ? requirements.filter(r=>r.plantId===selPlant) : requirements;
@@ -495,6 +593,9 @@ function AdminOverview({ dk, plants, users, requirements }) {
           </p>
         )}
       </div>
+
+      {/* Integration Config Status */}
+      <ConfigStatusPanel />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
@@ -1116,7 +1217,7 @@ function AdminSettings({ dk }) {
       if (saved) {
         const parsed = JSON.parse(saved.value);
         setSettings(s => ({ ...s, ...parsed, toast: false }));
-        if (parsed.ejsPublicKey) emailjs.init(parsed.ejsPublicKey);
+        if (parsed.ejsPublicKey) emailjs.init({ publicKey: parsed.ejsPublicKey });
       }
     } catch(_) {}
   }, []);
@@ -1126,7 +1227,7 @@ function AdminSettings({ dk }) {
     try {
       const { toast: _t, ...toSave } = settings;
       storage.set('adminSettings', JSON.stringify(toSave));
-      if (settings.ejsPublicKey) emailjs.init(settings.ejsPublicKey);
+      if (settings.ejsPublicKey) emailjs.init({ publicKey: settings.ejsPublicKey });
     } catch(_) {}
     setSettings(s => ({ ...s, toast: true }));
   };
@@ -1138,20 +1239,21 @@ function AdminSettings({ dk }) {
     if (!settings.ejsPublicKey || !settings.ejsServiceId || !settings.ejsTemplateId) {
       setEmailTestMsg('Fill in Public Key, Service ID and Template ID first.');
       setEmailTestStatus('error');
-      setTimeout(()=>setEmailTestStatus(null), 4000);
+      setTimeout(()=>setEmailTestStatus(null), 5000);
       return;
     }
     if (!settings.ejsToEmail) {
       setEmailTestMsg('Enter a recipient email address.');
       setEmailTestStatus('error');
-      setTimeout(()=>setEmailTestStatus(null), 4000);
+      setTimeout(()=>setEmailTestStatus(null), 5000);
       return;
     }
     setEmailTestStatus('sending');
     setEmailTestMsg('');
     try {
-      emailjs.init(settings.ejsPublicKey);
-      await emailjs.send(
+      // Always re-init with the current public key before sending
+      emailjs.init({ publicKey: settings.ejsPublicKey });
+      const result = await emailjs.send(
         settings.ejsServiceId,
         settings.ejsTemplateId,
         {
@@ -1159,18 +1261,35 @@ function AdminSettings({ dk }) {
           to_name:   'Compliance Team',
           from_name: 'LegalComp Pro',
           subject:   'LegalComp Pro – Email Configuration Test',
-          message:   `This is a test email sent from LegalComp Pro on ${new Date().toLocaleString('en-IN')}.\n\nYour email configuration via smtp.office365.com is working correctly.\n\n— LegalComp Pro Compliance System`,
+          message:   `This is a test email sent from LegalComp Pro on ${new Date().toLocaleString('en-IN')}.\n\nYour EmailJS configuration is working correctly.\n\n— LegalComp Pro Compliance System`,
           reply_to:  settings.fromEmail || settings.ejsToEmail,
         }
       );
-      setEmailTestStatus('success');
-      setEmailTestMsg(`Email delivered to ${settings.ejsToEmail}`);
+      if (result.status === 200) {
+        setEmailTestStatus('success');
+        setEmailTestMsg(`Email delivered to ${settings.ejsToEmail}`);
+      } else {
+        setEmailTestStatus('error');
+        setEmailTestMsg(`Unexpected status ${result.status}: ${result.text}`);
+      }
     } catch (err) {
       setEmailTestStatus('error');
-      const msg = err?.text || err?.message || JSON.stringify(err);
-      setEmailTestMsg(`Failed: ${msg}`);
+      // Provide actionable error details
+      const status = err?.status;
+      const text   = err?.text || err?.message || JSON.stringify(err);
+      if (status === 400) {
+        setEmailTestMsg(`Bad request (400): Check that your Template variables match — template must use {{to_name}}, {{from_name}}, {{subject}}, {{message}}, {{reply_to}}.`);
+      } else if (status === 401 || status === 403) {
+        setEmailTestMsg(`Auth error (${status}): Public Key is invalid or the Service/Template IDs don't belong to your account.`);
+      } else if (status === 404) {
+        setEmailTestMsg(`Not found (404): Service ID or Template ID is incorrect.`);
+      } else if (status === 422) {
+        setEmailTestMsg(`Unprocessable (422): Your Office 365 SMTP credentials in EmailJS are wrong, or MFA requires an App Password.`);
+      } else {
+        setEmailTestMsg(`Failed (${status||'network'}): ${text}`);
+      }
     }
-    setTimeout(()=>setEmailTestStatus(null), 6000);
+    setTimeout(()=>setEmailTestStatus(null), 8000);
   };
 
   const testFirebase = async () => {
