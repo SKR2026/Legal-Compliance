@@ -86,7 +86,9 @@ const storage = {
 const CHART_COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6'];
 const STATUS_CLR  = { Pending:'#f59e0b', 'In Progress':'#6366f1', Completed:'#22c55e', Overdue:'#ef4444' };
 const PRIORITY_CLR= { Critical:'#ef4444', High:'#f97316', Medium:'#f59e0b', Low:'#22c55e' };
-const CATEGORIES  = ['Environmental','Safety','Labor','Fire NOC','Factory License','Pollution Control','Quality','Other'];
+const DEFAULT_CATEGORIES = ['Environmental','Safety','Labor','Fire NOC','Factory License','Pollution Control','Quality','Other'];
+// CATEGORIES is now a global that can be updated at runtime by AdminCategories
+let CATEGORIES = (() => { try { const s=localStorage.getItem('categories'); return s?JSON.parse(s):DEFAULT_CATEGORIES; } catch(_){ return DEFAULT_CATEGORIES; } })();
 const PRIORITIES  = ['Critical','High','Medium','Low'];
 const STATUSES    = ['Pending','In Progress','Completed','Overdue'];
 const REM_FREQS   = ['Daily','Weekly','Bi-Weekly','Monthly'];
@@ -451,7 +453,8 @@ function LoginPage({ login }) {
 /* ═══════════════════════════════════════════
    ADMIN – OVERVIEW
 ═══════════════════════════════════════════ */
-function AdminOverview({ dk, plants, users, requirements }) {
+function AdminOverview({ dk, plants, users, requirements, categories: catsProp }) {
+  const cats = catsProp || CATEGORIES;
   const [selPlant, setSelPlant] = useState('');
   const [drillModal, setDrillModal] = useState(null);
 
@@ -474,7 +477,7 @@ function AdminOverview({ dk, plants, users, requirements }) {
   });
 
   const statusPie = STATUSES.map(s=>({ name:s, value:scopedReqs.filter(r=>r.status===s).length }));
-  const catPie    = CATEGORIES.map(c=>({ name:c, value:scopedReqs.filter(r=>r.category===c).length })).filter(d=>d.value>0);
+  const catPie    = cats.map(c=>({ name:c, value:scopedReqs.filter(r=>r.category===c).length })).filter(d=>d.value>0);
   const months    = ['Jan','Feb','Mar','Apr','May','Jun'];
   const trendData = months.map((m,i)=>({ m, Compliance:58+i*5+(i%2)*3, Target:90 }));
 
@@ -661,15 +664,7 @@ function AdminOverview({ dk, plants, users, requirements }) {
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie data={catPie} cx="50%" cy="50%" outerRadius={80} dataKey="value"
-                label={({cx,cy,midAngle,innerRadius,outerRadius,name,percent})=>{
-                  const RADIAN=Math.PI/180;
-                  const r=innerRadius+(outerRadius-innerRadius)*0.55;
-                  const x=cx+r*Math.cos(-midAngle*RADIAN);
-                  const y=cy+r*Math.sin(-midAngle*RADIAN);
-                  if(percent<0.05) return null;
-                  return <text x={x} y={y} fill="#ffffff" textAnchor="middle" dominantBaseline="central" fontSize={10} fontFamily="DM Sans" fontWeight="600">{`${name.split(' ')[0]} ${(percent*100).toFixed(0)}%`}</text>;
-                }}
-                labelLine={false} fontSize={10} fontFamily="DM Sans"
+                isAnimationActive={true}
                 cursor="pointer" onClick={d=>d&&openDrill(`Category: ${d.name} – ${scopeLabel}`,scopedReqs.filter(r=>r.category===d.name))}>
                 {catPie.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]} />)}
               </Pie>
@@ -713,8 +708,9 @@ function AdminOverview({ dk, plants, users, requirements }) {
 /* ═══════════════════════════════════════════
    REQUIREMENT MODAL (Add / Edit)
 ═══════════════════════════════════════════ */
-function RequirementModal({ open, onClose, onSave, initial, plants, users, dk }) {
-  const blank = { title:'', description:'', category:CATEGORIES[0], priority:'High', plantId:'', assignedTo:'', status:'Pending', dueDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'' };
+function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, categories: catsProp }) {
+  const cats = catsProp || CATEGORIES;
+  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', assignedTo:'', status:'Pending', dueDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'' };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   useEffect(()=>{ setForm(initial || blank); }, [open]);
@@ -758,7 +754,7 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk })
         </FormField>
         <FormField label="Category" required>
           <select value={form.category} onChange={e=>set('category',e.target.value)} className={selectCls}>
-            {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+            {cats.map(c=><option key={c}>{c}</option>)}
           </select>
         </FormField>
         <FormField label="Priority" required>
@@ -804,7 +800,8 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk })
 /* ═══════════════════════════════════════════
    ADMIN – REQUIREMENTS
 ═══════════════════════════════════════════ */
-function AdminRequirements({ dk, plants, users, requirements, updateRequirements }) {
+function AdminRequirements({ dk, plants, users, requirements, updateRequirements, categories: catsProp }) {
+  const cats = catsProp || CATEGORIES;
   const [filters,      setFilters]      = useState({ plant:'', status:'', priority:'', search:'' });
   const [showAdd,      setShowAdd]      = useState(false);
   const [editReq,      setEditReq]      = useState(null);
@@ -909,8 +906,8 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
         </div>
       )}
 
-      <RequirementModal open={showAdd} onClose={()=>setShowAdd(false)} onSave={addReq} plants={plants} users={users} dk={dk} />
-      <RequirementModal open={!!editReq} onClose={()=>setEditReq(null)} onSave={saveEdit} initial={editReq} plants={plants} users={users} dk={dk} />
+      <RequirementModal open={showAdd} onClose={()=>setShowAdd(false)} onSave={addReq} plants={plants} users={users} dk={dk} categories={cats} />
+      <RequirementModal open={!!editReq} onClose={()=>setEditReq(null)} onSave={saveEdit} initial={editReq} plants={plants} users={users} dk={dk} categories={cats} />
 
       <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide>
         {viewReq && (() => {
@@ -1669,7 +1666,8 @@ function AdminSettings({ dk }) {
 /* ═══════════════════════════════════════════
    SUPER ADMIN – BULK UPLOAD
 ═══════════════════════════════════════════ */
-function BulkUpload({ dk, plants, users, requirements, updateRequirements }) {
+function BulkUpload({ dk, plants, users, requirements, updateRequirements, categories: catsProp }) {
+  const cats = catsProp || CATEGORIES;
   const [tab,          setTab]          = useState('upload');   // 'upload' | 'preview' | 'history'
   const [dragOver,     setDragOver]     = useState(false);
   const [rawRows,      setRawRows]      = useState([]);
@@ -1696,7 +1694,7 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements }) {
         [
           `"${['Factory License Renewal','Pollution Control NOC','Fire Safety Certificate'][i]}"`,
           `"Ensure statutory compliance for ${p.name}"`,
-          CATEGORIES[i % CATEGORIES.length],
+          cats[i % cats.length],
           PRIORITIES[i % 4],
           'Pending',
           p.id,
@@ -1755,7 +1753,7 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements }) {
         else rowErrs.push(`user email not found: ${obj.assigned_email}`);
       }
 
-      const category = CATEGORIES.includes(obj.category) ? obj.category : CATEGORIES[0];
+      const category = cats.includes(obj.category) ? obj.category : (cats[0]||'Other');
       const priority = PRIORITIES.includes(obj.priority) ? obj.priority : 'Medium';
       const status   = STATUSES.includes(obj.status)     ? obj.status   : 'Pending';
       const escLvl   = [1,2,3].includes(+obj.escalation_level) ? +obj.escalation_level : 1;
@@ -1949,7 +1947,7 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements }) {
                   {[
                     ['title','Text','✅ Yes','Requirement title'],
                     ['description','Text','No','Detailed description'],
-                    ['category','Enum','No',CATEGORIES.join(', ')],
+                    ['category','Enum','No',cats.join(', ')],
                     ['priority','Enum','No','Critical / High / Medium / Low'],
                     ['status','Enum','No','Pending / In Progress / Completed / Overdue'],
                     ['plant_id','ID','⚡ Or state','Plant ID (e.g. p1, p2…)'],
@@ -2151,9 +2149,197 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements }) {
 }
 
 /* ═══════════════════════════════════════════
+   ADMIN – CATEGORIES
+═══════════════════════════════════════════ */
+function AdminCategories({ dk, categories, updateCategories }) {
+  const [cats,     setCats]     = useState(categories);
+  const [newCat,   setNewCat]   = useState('');
+  const [editIdx,  setEditIdx]  = useState(null);
+  const [editVal,  setEditVal]  = useState('');
+  const [delIdx,   setDelIdx]   = useState(null);
+  const [toast,    setToast]    = useState(null);
+
+  // Keep local state in sync if parent changes
+  useEffect(()=>{ setCats(categories); }, [categories]);
+
+  const showToast = (msg, type='success') => {
+    setToast({msg, type});
+    setTimeout(()=>setToast(null), 3000);
+  };
+
+  const save = (updated) => {
+    setCats(updated);
+    CATEGORIES = updated; // update global
+    localStorage.setItem('categories', JSON.stringify(updated));
+    updateCategories(updated);
+  };
+
+  const addCat = () => {
+    const trimmed = newCat.trim();
+    if (!trimmed) return;
+    if (cats.map(c=>c.toLowerCase()).includes(trimmed.toLowerCase())) {
+      showToast('Category already exists', 'error'); return;
+    }
+    save([...cats, trimmed]);
+    setNewCat('');
+    showToast(`"${trimmed}" added`);
+  };
+
+  const startEdit = (i) => { setEditIdx(i); setEditVal(cats[i]); };
+
+  const saveEdit = () => {
+    const trimmed = editVal.trim();
+    if (!trimmed) return;
+    if (cats.map((c,i)=>i!==editIdx?c.toLowerCase():null).filter(Boolean).includes(trimmed.toLowerCase())) {
+      showToast('Category name already exists', 'error'); return;
+    }
+    const updated = cats.map((c,i)=>i===editIdx?trimmed:c);
+    save(updated);
+    setEditIdx(null);
+    showToast(`Updated to "${trimmed}"`);
+  };
+
+  const confirmDel = () => {
+    const removed = cats[delIdx];
+    save(cats.filter((_,i)=>i!==delIdx));
+    setDelIdx(null);
+    showToast(`"${removed}" deleted`);
+  };
+
+  const moveUp = (i) => {
+    if (i===0) return;
+    const updated = [...cats];
+    [updated[i-1],updated[i]]=[updated[i],updated[i-1]];
+    save(updated);
+  };
+  const moveDown = (i) => {
+    if (i===cats.length-1) return;
+    const updated = [...cats];
+    [updated[i+1],updated[i]]=[updated[i],updated[i+1]];
+    save(updated);
+  };
+
+  const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
+  const sub  = dk?'text-gray-400':'text-gray-500';
+  const COLORS_POOL = ['#6366f1','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#f97316','#84cc16','#0ea5e9','#a855f7'];
+
+  return (
+    <div className="space-y-5">
+      <ConfirmModal
+        open={delIdx!==null}
+        message={delIdx!==null ? `Delete category "${cats[delIdx]}"? Requirements using it will retain the label but it won't appear in new dropdowns.` : ''}
+        onConfirm={confirmDel}
+        onCancel={()=>setDelIdx(null)}
+      />
+
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-5 right-5 z-[100] px-5 py-3 rounded-xl shadow-xl text-sm font-semibold flex items-center gap-2 transition-all
+          ${toast.type==='error'?'bg-red-500 text-white':'bg-green-500 text-white'}`}>
+          {toast.type==='error'?'❌':'✅'} {toast.msg}
+        </div>
+      )}
+
+      {/* Info banner */}
+      <div className={`p-4 rounded-2xl border flex items-start gap-3 ${dk?'bg-indigo-900/20 border-indigo-700/40':'bg-indigo-50 border-indigo-100'}`}>
+        <span className="text-xl mt-0.5">🏷️</span>
+        <div>
+          <p className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">Compliance Categories</p>
+          <p className={`text-xs mt-0.5 ${sub}`}>Categories are used to classify requirements across all plants. Changes apply immediately to all dropdowns. Existing requirements retain their category label.</p>
+        </div>
+      </div>
+
+      {/* Add new category */}
+      <div className={`${card} p-5`}>
+        <h3 className="font-semibold text-sm mb-3" style={{fontFamily:"'Outfit',sans-serif"}}>Add New Category</h3>
+        <div className="flex gap-3">
+          <input
+            value={newCat}
+            onChange={e=>setNewCat(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&addCat()}
+            placeholder="e.g. Water Management, ISO Compliance…"
+            className={`${inputCls} flex-1`}
+          />
+          <button
+            onClick={addCat}
+            disabled={!newCat.trim()}
+            className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40 transition-colors shadow-md shadow-indigo-200 flex-shrink-0"
+          >
+            + Add
+          </button>
+        </div>
+      </div>
+
+      {/* Categories list */}
+      <div className={`${card} overflow-hidden`}>
+        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-sm" style={{fontFamily:"'Outfit',sans-serif"}}>All Categories</h3>
+            <p className={`text-xs mt-0.5 ${sub}`}>{cats.length} categor{cats.length===1?'y':'ies'} · drag order affects chart display</p>
+          </div>
+        </div>
+
+        {cats.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-4xl mb-3">📂</p>
+            <p className="font-semibold text-gray-500">No categories yet</p>
+            <p className={`text-sm mt-1 ${sub}`}>Add your first category above</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {cats.map((cat, i) => (
+              <div key={i} className={`flex items-center gap-3 px-5 py-3.5 transition-colors ${dk?'hover:bg-gray-700/40':'hover:bg-gray-50'}`}>
+                {/* Color dot */}
+                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background: COLORS_POOL[i % COLORS_POOL.length]}} />
+
+                {/* Order controls */}
+                <div className="flex flex-col gap-0.5">
+                  <button onClick={()=>moveUp(i)} disabled={i===0}
+                    className={`text-xs leading-none px-1 rounded transition-colors ${i===0?'opacity-20 cursor-not-allowed':dk?'hover:bg-gray-600 text-gray-300':'hover:bg-gray-200 text-gray-500'}`}>▲</button>
+                  <button onClick={()=>moveDown(i)} disabled={i===cats.length-1}
+                    className={`text-xs leading-none px-1 rounded transition-colors ${i===cats.length-1?'opacity-20 cursor-not-allowed':dk?'hover:bg-gray-600 text-gray-300':'hover:bg-gray-200 text-gray-500'}`}>▼</button>
+                </div>
+
+                {/* Index badge */}
+                <span className={`text-xs w-5 text-center font-mono ${sub}`}>{i+1}</span>
+
+                {/* Edit inline or display */}
+                {editIdx === i ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      value={editVal}
+                      onChange={e=>setEditVal(e.target.value)}
+                      onKeyDown={e=>{ if(e.key==='Enter') saveEdit(); if(e.key==='Escape') setEditIdx(null); }}
+                      autoFocus
+                      className={`${inputCls} flex-1 py-1.5 text-sm`}
+                    />
+                    <button onClick={saveEdit} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors">Save</button>
+                    <button onClick={()=>setEditIdx(null)} className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${dk?'border-gray-600 text-gray-300 hover:bg-gray-700':'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>Cancel</button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="flex-1 text-sm font-medium">{cat}</span>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button onClick={()=>startEdit(i)}
+                        className={`p-1.5 rounded-lg text-xs transition-colors ${dk?'hover:bg-amber-900/30 text-amber-400':'hover:bg-amber-50 text-amber-600'}`} title="Edit">✏️</button>
+                      <button onClick={()=>setDelIdx(i)}
+                        className={`p-1.5 rounded-lg text-xs transition-colors ${dk?'hover:bg-red-900/30 text-red-400':'hover:bg-red-50 text-red-500'}`} title="Delete">🗑️</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    ADMIN DASHBOARD
 ═══════════════════════════════════════════ */
-function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updatePlants, updateUsers, updateRequirements, logout }) {
+function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updatePlants, updateUsers, updateRequirements, logout, categories, updateCategories }) {
   const [activePage, setActivePage] = useState('overview');
   const overdueCount = requirements.filter(r=>r.status==='Overdue').length;
 
@@ -2163,15 +2349,17 @@ function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requireme
     { id:'bulk',         icon:'📤', label:'Bulk Upload' },
     { id:'users',        icon:'👥', label:'Users' },
     { id:'plants',       icon:'🏭', label:'Plants' },
+    { id:'categories',   icon:'🏷️', label:'Categories' },
     { id:'settings',     icon:'⚙️', label:'Settings' },
   ];
 
   const pages = {
-    overview:     <AdminOverview dk={dk} plants={plants} users={users} requirements={requirements} />,
-    requirements: <AdminRequirements dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} />,
-    bulk:         <BulkUpload dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} />,
+    overview:     <AdminOverview dk={dk} plants={plants} users={users} requirements={requirements} categories={categories} />,
+    requirements: <AdminRequirements dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} categories={categories} />,
+    bulk:         <BulkUpload dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} categories={categories} />,
     users:        <AdminUsers dk={dk} plants={plants} users={users} updateUsers={updateUsers} />,
     plants:       <AdminPlants dk={dk} plants={plants} updatePlants={updatePlants} />,
+    categories:   <AdminCategories dk={dk} categories={categories} updateCategories={updateCategories} />,
     settings:     <AdminSettings dk={dk} />,
   };
 
@@ -2250,14 +2438,7 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={statusPie} cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={3} dataKey="value"
-                label={({cx,cy,midAngle,innerRadius,outerRadius,name,value})=>{
-                  if(!value) return null;
-                  const RADIAN=Math.PI/180;
-                  const r=innerRadius+(outerRadius-innerRadius)*0.55;
-                  const x=cx+r*Math.cos(-midAngle*RADIAN);
-                  const y=cy+r*Math.sin(-midAngle*RADIAN);
-                  return <text x={x} y={y} fill="#ffffff" textAnchor="middle" dominantBaseline="central" fontSize={10} fontFamily="DM Sans" fontWeight="600">{`${name}:${value}`}</text>;
-                }} labelLine={false} fontSize={10}>
+                isAnimationActive={true}>
                 {statusPie.map((e,i)=><Cell key={i} fill={Object.values(STATUS_CLR)[i]} />)}
               </Pie>
               <Tooltip {...TT} />
@@ -2615,6 +2796,9 @@ function App() {
   const [plants,       setPlants]       = useState(mkPlants);
   const [users,        setUsers]        = useState(mkUsers);
   const [requirements, setRequirements] = useState(null);
+  const [categories,   setCategories]   = useState(() => {
+    try { const s=localStorage.getItem('categories'); return s?JSON.parse(s):DEFAULT_CATEGORIES; } catch(_){ return DEFAULT_CATEGORIES; }
+  });
   const [ready,        setReady]        = useState(false);
   const [syncStatus,   setSyncStatus]   = useState('idle'); // 'idle'|'syncing'|'synced'|'error'
 
@@ -2725,6 +2909,7 @@ function App() {
   const updatePlants       = p => { setPlants(p);       persist('plants',       p, FB_PLANTS); };
   const updateUsers        = u => { setUsers(u);         persist('users',        u, FB_USERS);  };
   const updateRequirements = r => { setRequirements(r); persist('requirements', r, FB_REQS);   };
+  const updateCategories   = c => { setCategories(c); CATEGORIES = c; try { localStorage.setItem('categories', JSON.stringify(c)); } catch(_){} };
   const toggleTheme = () => { const t=theme==='light'?'dark':'light'; setTheme(t); persistStr('theme',t); };
 
   const login = (email, password) => {
@@ -2755,7 +2940,7 @@ function App() {
   );
 
   const ctx = { dk, toggleTheme, currentUser, plants, users, requirements,
-                updatePlants, updateUsers, updateRequirements, logout, syncStatus };
+                updatePlants, updateUsers, updateRequirements, logout, syncStatus, categories, updateCategories };
 
   if (page==='login')          return <LoginPage {...ctx} login={login} />;
   if (page==='admin')          return <AdminDashboard {...ctx} />;
