@@ -22,6 +22,9 @@
   <!-- Babel standalone (transpile JSX in browser) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- EmailJS – sends real email via SMTP relay from the browser -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; padding: 0; font-family: 'DM Sans', sans-serif; }
@@ -1076,10 +1079,18 @@ function AdminSettings({ dk }) {
     overdueAlert: true,
     autoEscalate: true,
     escalateDays: 7,
-    smtpHost: 'smtp.gmail.com',
+    smtpHost: 'smtp.office365.com',
     smtpPort: '587',
-    fromEmail: 'compliance@legalcomp.com',
+    fromEmail: '',
+    smtpUser: '',
+    smtpPass: '',
     toast: false,
+    // EmailJS (browser SMTP relay)
+    ejsPublicKey: '',
+    ejsServiceId: '',
+    ejsTemplateId: '',
+    ejsToEmail: 'sushil@polyplasticsindia.com',
+    ejsEnabled: false,
     // Firebase
     fbApiKey: '',
     fbAuthDomain: '',
@@ -1090,32 +1101,77 @@ function AdminSettings({ dk }) {
     fbMeasurementId: '',
     fbEnabled: false,
   });
-  const [fbTestStatus, setFbTestStatus] = useState(null); // null | 'testing' | 'success' | 'error'
-  const [fbShowSecret, setFbShowSecret] = useState(false);
+  const [fbTestStatus,    setFbTestStatus]    = useState(null);
+  const [fbShowSecret,    setFbShowSecret]    = useState(false);
+  const [emailTestStatus, setEmailTestStatus] = useState(null); // null | 'sending' | 'success' | 'error'
+  const [emailTestMsg,    setEmailTestMsg]    = useState('');
+  const [ejsShowPass,     setEjsShowPass]     = useState(false);
 
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
 
-  // Load persisted settings on mount
+  // Load persisted settings on mount + init EmailJS if key exists
   useEffect(() => {
     try {
       const saved = storage.get('adminSettings');
       if (saved) {
         const parsed = JSON.parse(saved.value);
         setSettings(s => ({ ...s, ...parsed, toast: false }));
+        if (parsed.ejsPublicKey) emailjs.init(parsed.ejsPublicKey);
       }
     } catch(_) {}
   }, []);
 
-  // Save all settings to localStorage and show toast
+  // Save all settings to localStorage and re-init EmailJS
   const save = () => {
     try {
       const { toast: _t, ...toSave } = settings;
       storage.set('adminSettings', JSON.stringify(toSave));
+      if (settings.ejsPublicKey) emailjs.init(settings.ejsPublicKey);
     } catch(_) {}
     setSettings(s => ({ ...s, toast: true }));
   };
 
   useEffect(()=>{ if(settings.toast) setTimeout(()=>set('toast',false),3000); },[settings.toast]);
+
+  /* ── Send a real test email via EmailJS ── */
+  const sendTestEmail = async () => {
+    if (!settings.ejsPublicKey || !settings.ejsServiceId || !settings.ejsTemplateId) {
+      setEmailTestMsg('Fill in Public Key, Service ID and Template ID first.');
+      setEmailTestStatus('error');
+      setTimeout(()=>setEmailTestStatus(null), 4000);
+      return;
+    }
+    if (!settings.ejsToEmail) {
+      setEmailTestMsg('Enter a recipient email address.');
+      setEmailTestStatus('error');
+      setTimeout(()=>setEmailTestStatus(null), 4000);
+      return;
+    }
+    setEmailTestStatus('sending');
+    setEmailTestMsg('');
+    try {
+      emailjs.init(settings.ejsPublicKey);
+      await emailjs.send(
+        settings.ejsServiceId,
+        settings.ejsTemplateId,
+        {
+          to_email:  settings.ejsToEmail,
+          to_name:   'Compliance Team',
+          from_name: 'LegalComp Pro',
+          subject:   'LegalComp Pro – Email Configuration Test',
+          message:   `This is a test email sent from LegalComp Pro on ${new Date().toLocaleString('en-IN')}.\n\nYour email configuration via smtp.office365.com is working correctly.\n\n— LegalComp Pro Compliance System`,
+          reply_to:  settings.fromEmail || settings.ejsToEmail,
+        }
+      );
+      setEmailTestStatus('success');
+      setEmailTestMsg(`Email delivered to ${settings.ejsToEmail}`);
+    } catch (err) {
+      setEmailTestStatus('error');
+      const msg = err?.text || err?.message || JSON.stringify(err);
+      setEmailTestMsg(`Failed: ${msg}`);
+    }
+    setTimeout(()=>setEmailTestStatus(null), 6000);
+  };
 
   const testFirebase = async () => {
     if (!settings.fbApiKey || !settings.fbProjectId) {
@@ -1189,14 +1245,94 @@ function AdminSettings({ dk }) {
       </div>
 
       <div className={card}>
-        <h3 className="font-semibold mb-4 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
-          <span>📮</span> SMTP / Email Server
+        <h3 className="font-semibold mb-1 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+          <span>📮</span> Email Delivery (EmailJS + Office 365 SMTP)
         </h3>
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label="SMTP Host"><input value={settings.smtpHost} onChange={e=>set('smtpHost',e.target.value)} className={inputCls} /></FormField>
-          <FormField label="Port"><input value={settings.smtpPort} onChange={e=>set('smtpPort',e.target.value)} className={inputCls} /></FormField>
-          <div className="col-span-2">
-            <FormField label="From Email"><input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} /></FormField>
+        <p className={`text-xs mb-4 ${sub}`}>
+          Browsers cannot connect to SMTP directly. EmailJS acts as a secure relay — it uses your Office 365 credentials on its server and delivers real email to your recipients.
+        </p>
+
+        {/* Enable toggle */}
+        <div className={`flex items-center justify-between p-3 rounded-xl mb-5 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+          <div>
+            <p className="text-sm font-medium">Enable Email Notifications</p>
+            <p className={`text-xs ${sub}`}>Send escalation & reminder emails via Office 365</p>
+          </div>
+          <button onClick={()=>set('ejsEnabled',!settings.ejsEnabled)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${settings.ejsEnabled?'bg-indigo-600':'bg-gray-300'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.ejsEnabled?'left-6':'left-0.5'}`} />
+          </button>
+        </div>
+
+        {/* Setup steps */}
+        <div className={`mb-5 p-4 rounded-xl border text-xs space-y-2 ${dk?'bg-blue-900/20 border-blue-800/40 text-blue-300':'bg-blue-50 border-blue-100 text-blue-700'}`}>
+          <p className="font-semibold text-sm mb-2">⚡ One-time setup (5 minutes)</p>
+          <p>1. Go to <strong>emailjs.com</strong> → create a free account.</p>
+          <p>2. <strong>Email Services</strong> → Add New Service → choose <em>Outlook / Office 365</em>.</p>
+          <p className="pl-3">Host: <code className="font-mono">smtp.office365.com</code> · Port: <code className="font-mono">587</code> · TLS: on</p>
+          <p className="pl-3">Enter your Office 365 email &amp; password (or an App Password if MFA is on).</p>
+          <p className="pl-3">Click <em>Connect Account</em> → copy the <strong>Service ID</strong> below.</p>
+          <p>3. <strong>Email Templates</strong> → Create Template. Paste this in the body:</p>
+          <pre className={`text-xs rounded-lg p-2 mt-1 overflow-x-auto ${dk?'bg-gray-900':'bg-white border border-blue-200'}`}>{`Subject: {{subject}}\n\nDear {{to_name}},\n\n{{message}}\n\n— {{from_name}}`}</pre>
+          <p className="pl-3">Save → copy the <strong>Template ID</strong>.</p>
+          <p>4. <strong>Account → API Keys</strong> → copy your <strong>Public Key</strong>.</p>
+          <p>5. Paste all three keys below, set recipient email, then <em>Save All Settings</em> and <em>Send Test Email</em>.</p>
+        </div>
+
+        <div className={`space-y-4 transition-opacity ${settings.ejsEnabled?'opacity-100':'opacity-50 pointer-events-none'}`}>
+          {/* SMTP reference fields */}
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="SMTP Host (reference)">
+              <input value={settings.smtpHost} onChange={e=>set('smtpHost',e.target.value)} className={inputCls} placeholder="smtp.office365.com" />
+            </FormField>
+            <FormField label="SMTP Port">
+              <input value={settings.smtpPort} onChange={e=>set('smtpPort',e.target.value)} className={inputCls} placeholder="587" />
+            </FormField>
+            <FormField label="Office 365 Email (From)">
+              <input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
+            </FormField>
+            <FormField label="Recipient Email (To)">
+              <input type="email" value={settings.ejsToEmail} onChange={e=>set('ejsToEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
+            </FormField>
+          </div>
+
+          {/* EmailJS credentials */}
+          <div className={`p-4 rounded-xl border space-y-4 ${dk?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-200'}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">EmailJS Credentials</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField label="Public Key" required>
+                <input value={settings.ejsPublicKey} onChange={e=>set('ejsPublicKey',e.target.value)} placeholder="user_XXXXXXXXXXXXXXXXX" className={inputCls} />
+              </FormField>
+              <FormField label="Service ID" required>
+                <input value={settings.ejsServiceId} onChange={e=>set('ejsServiceId',e.target.value)} placeholder="service_xxxxxxx" className={inputCls} />
+              </FormField>
+              <div className="sm:col-span-2">
+                <FormField label="Template ID" required>
+                  <input value={settings.ejsTemplateId} onChange={e=>set('ejsTemplateId',e.target.value)} placeholder="template_xxxxxxx" className={inputCls} />
+                </FormField>
+              </div>
+            </div>
+          </div>
+
+          {/* Test button + status */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={sendTestEmail} disabled={emailTestStatus==='sending'}
+              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center gap-2
+                ${emailTestStatus==='sending'?'bg-indigo-400 text-white cursor-wait':'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200'}`}>
+              {emailTestStatus==='sending'
+                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"/>Sending…</>
+                : '📧 Send Test Email'}
+            </button>
+            {emailTestStatus==='success' && (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
+                ✅ {emailTestMsg}
+              </span>
+            )}
+            {emailTestStatus==='error' && (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-red-500 max-w-xs">
+                ❌ {emailTestMsg}
+              </span>
+            )}
           </div>
         </div>
       </div>
