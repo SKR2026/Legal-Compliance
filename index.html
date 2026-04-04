@@ -647,7 +647,7 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk })
   const [saving, setSaving] = useState(false);
   useEffect(()=>{ setForm(initial || blank); }, [open]);
 
-  const plantUsers = users.filter(u=>u.plantId===form.plantId && u.role==='user');
+  const plantUsers = users.filter(u=>u.plantId===form.plantId && ['user','plant_head'].includes(u.role));
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
   const save = async () => {
