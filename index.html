@@ -25,6 +25,32 @@
   <!-- EmailJS – sends real email via SMTP relay from the browser -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 
+  <!-- Firebase SDK (compat build) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
+
+  <!-- Firebase Initialization -->
+  <script>
+    const FIREBASE_CONFIG = {
+      apiKey:            "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
+      authDomain:        "skr-task.firebaseapp.com",
+      projectId:         "skr-task",
+      storageBucket:     "skr-task.firebasestorage.app",
+      messagingSenderId: "1011690659933",
+      appId:             "1:1011690659933:web:f57e43ee0267a475682db4",
+      measurementId:     "G-67NGHMK0QR"
+    };
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
+    // Expose Firestore globally so React components can use it
+    window.db = firebase.firestore();
+    window.fbAuth = firebase.auth();
+    console.log("✅ Firebase initialized — project: skr-task");
+  </script>
+
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; padding: 0; font-family: 'DM Sans', sans-serif; }
@@ -177,6 +203,40 @@ function FormField({ label, required, children }) {
 const inputCls = "w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition";
 const selectCls = inputCls + " cursor-pointer";
 
+/* ─── FIREBASE STATUS BADGE ─── */
+function FirebaseStatusBadge() {
+  const [status, setStatus] = React.useState('checking'); // 'checking' | 'connected' | 'error'
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      try {
+        await window.db.collection('_ping').limit(1).get();
+        if (!cancelled) setStatus('connected');
+      } catch (e) {
+        if (!cancelled) setStatus('error');
+      }
+    }
+    check();
+    // Re-check every 60s
+    const interval = setInterval(check, 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  const cfg = {
+    checking:  { dot: 'bg-yellow-400 animate-pulse', text: 'text-yellow-600 dark:text-yellow-300', label: 'Firebase…',   title: 'Connecting to Firebase…' },
+    connected: { dot: 'bg-green-500',                text: 'text-green-600 dark:text-green-400',   label: 'Firebase ✓',  title: 'Firebase connected — skr-task' },
+    error:     { dot: 'bg-red-500',                  text: 'text-red-600 dark:text-red-400',        label: 'Firebase ✗',  title: 'Firebase connection failed — check Firestore rules' },
+  }[status];
+
+  return (
+    <div className="flex items-center gap-1.5 text-xs font-semibold select-none cursor-default" title={cfg.title}>
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
+      <span className={cfg.text}>{cfg.label}</span>
+    </div>
+  );
+}
+
 /* ─── APP SHELL ─── */
 function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage, children, role, logout }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -237,6 +297,8 @@ function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBg}`}>{roleTag}</span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Firebase connection status */}
+            <FirebaseStatusBadge />
             <button onClick={toggleTheme} className={`p-2 rounded-lg transition-colors ${dk?'text-yellow-400 hover:bg-gray-700':'text-slate-600 hover:bg-gray-100'}`} title="Toggle Theme">
               {dk?'☀️':'🌙'}
             </button>
@@ -391,104 +453,6 @@ function LoginPage({ login }) {
 ═══════════════════════════════════════════ */
 function AdminOverview({ dk, plants, users, requirements }) {
   const [selPlant, setSelPlant] = useState('');
-
-  /* ── Config Status (read from localStorage) ── */
-  const [cfgStatus, setCfgStatus] = useState({ ejsEnabled:false, ejsConfigured:false, fbEnabled:false, fbConfigured:false, ejsToEmail:'', fbProjectId:'' });
-  useEffect(() => {
-    try {
-      const saved = storage.get('adminSettings');
-      if (saved) {
-        const s = JSON.parse(saved.value);
-        setCfgStatus({
-          ejsEnabled:   !!s.ejsEnabled,
-          ejsConfigured: !!(s.ejsPublicKey && s.ejsServiceId && s.ejsTemplateId),
-          fbEnabled:    !!s.fbEnabled,
-          fbConfigured: !!(s.fbApiKey && s.fbProjectId && s.fbAppId),
-          ejsToEmail:   s.ejsToEmail || '',
-          fbProjectId:  s.fbProjectId || '',
-        });
-      }
-    } catch(_) {}
-  }, []);
-
-  const ConfigStatusPanel = () => {
-    const panelBg = dk ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
-    const rowBg   = dk ? 'bg-gray-700/50' : 'bg-gray-50';
-    const sub2    = dk ? 'text-gray-400' : 'text-gray-500';
-
-    const StatusDot = ({ on, label, detail }) => (
-      <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${rowBg}`}>
-        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${on ? 'bg-green-500 shadow-sm shadow-green-400' : 'bg-gray-300'}`} />
-        <div className="min-w-0 flex-1">
-          <p className={`text-xs font-semibold ${on ? (dk?'text-white':'text-gray-800') : sub2}`}>{label}</p>
-          {detail && <p className={`text-xs truncate ${sub2}`}>{detail}</p>}
-        </div>
-        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${on ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-          {on ? 'Active' : 'Off'}
-        </span>
-      </div>
-    );
-
-    const ejsOk  = cfgStatus.ejsEnabled && cfgStatus.ejsConfigured;
-    const ejsWarn= cfgStatus.ejsEnabled && !cfgStatus.ejsConfigured;
-    const fbOk   = cfgStatus.fbEnabled  && cfgStatus.fbConfigured;
-    const fbWarn = cfgStatus.fbEnabled  && !cfgStatus.fbConfigured;
-
-    return (
-      <div className={`rounded-2xl border p-5 shadow-sm ${panelBg}`}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
-            <span>⚙️</span> Integration Status
-          </h3>
-          <a href="#" onClick={e=>{e.preventDefault();}} className="text-xs text-indigo-400 hover:underline">Configure in Settings →</a>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {/* EmailJS */}
-          <div className={`rounded-xl border p-3 space-y-2 ${ejsOk ? (dk?'border-green-800/40 bg-green-900/10':'border-green-200 bg-green-50') : ejsWarn ? (dk?'border-amber-800/40 bg-amber-900/10':'border-amber-200 bg-amber-50') : (dk?'border-gray-700 bg-gray-700/30':'border-gray-200 bg-gray-50')}`}>
-            <div className="flex items-center gap-2">
-              <span className="text-base">📧</span>
-              <p className={`text-xs font-bold ${ejsOk?'text-green-600':ejsWarn?'text-amber-600':sub2}`}>
-                EmailJS {ejsOk ? '✓ Ready' : ejsWarn ? '⚠ Incomplete' : '— Disabled'}
-              </p>
-            </div>
-            {cfgStatus.ejsEnabled ? (
-              <div className={`text-xs space-y-0.5 ${sub2}`}>
-                <p>{cfgStatus.ejsConfigured ? '✅ Credentials configured' : '❌ Missing Public Key / Service ID / Template ID'}</p>
-                {cfgStatus.ejsToEmail && <p>📬 To: {cfgStatus.ejsToEmail}</p>}
-              </div>
-            ) : (
-              <p className={`text-xs ${sub2}`}>Enable in Settings → Email Delivery</p>
-            )}
-          </div>
-
-          {/* Firebase */}
-          <div className={`rounded-xl border p-3 space-y-2 ${fbOk ? (dk?'border-orange-800/40 bg-orange-900/10':'border-orange-200 bg-orange-50') : fbWarn ? (dk?'border-amber-800/40 bg-amber-900/10':'border-amber-200 bg-amber-50') : (dk?'border-gray-700 bg-gray-700/30':'border-gray-200 bg-gray-50')}`}>
-            <div className="flex items-center gap-2">
-              <span className="text-base">🔥</span>
-              <p className={`text-xs font-bold ${fbOk?'text-orange-600':fbWarn?'text-amber-600':sub2}`}>
-                Firebase {fbOk ? '✓ Ready' : fbWarn ? '⚠ Incomplete' : '— Disabled'}
-              </p>
-            </div>
-            {cfgStatus.fbEnabled ? (
-              <div className={`text-xs space-y-0.5 ${sub2}`}>
-                <p>{cfgStatus.fbConfigured ? '✅ API Key + Project + App ID set' : '❌ Missing API Key / Project ID / App ID'}</p>
-                {cfgStatus.fbProjectId && <p>🗂️ Project: {cfgStatus.fbProjectId}</p>}
-              </div>
-            ) : (
-              <p className={`text-xs ${sub2}`}>Enable in Settings → Firebase Configuration</p>
-            )}
-          </div>
-        </div>
-
-        {/* Quick hint if both are off */}
-        {!cfgStatus.ejsEnabled && !cfgStatus.fbEnabled && (
-          <p className={`text-xs mt-3 text-center ${sub2}`}>
-            💡 Go to <strong>Settings</strong> to configure email delivery and Firebase integration.
-          </p>
-        )}
-      </div>
-    );
-  };
   const [drillModal, setDrillModal] = useState(null);
 
   const scopedReqs = selPlant ? requirements.filter(r=>r.plantId===selPlant) : requirements;
@@ -593,9 +557,6 @@ function AdminOverview({ dk, plants, users, requirements }) {
           </p>
         )}
       </div>
-
-      {/* Integration Config Status */}
-      <ConfigStatusPanel />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
@@ -837,117 +798,46 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk })
    ADMIN – REQUIREMENTS
 ═══════════════════════════════════════════ */
 function AdminRequirements({ dk, plants, users, requirements, updateRequirements }) {
-  const [filters,      setFilters]      = useState({ plant:'', status:'', priority:'', search:'' });
-  const [showAdd,      setShowAdd]      = useState(false);
-  const [editReq,      setEditReq]      = useState(null);
-  const [viewReq,      setViewReq]      = useState(null);
-  const [delId,        setDelId]        = useState(null);
-  // bulk-select state
-  const [selected,     setSelected]     = useState(new Set());   // Set of req IDs
-  const [bulkDelOpen,  setBulkDelOpen]  = useState(false);
-  const [bulkDelDone,  setBulkDelDone]  = useState(false);       // success toast
+  const [filters, setFilters]   = useState({ plant:'', status:'', priority:'', search:'' });
+  const [showAdd, setShowAdd]   = useState(false);
+  const [editReq, setEditReq]   = useState(null);
+  const [viewReq, setViewReq]   = useState(null);
+  const [delId,   setDelId]     = useState(null);
 
-  const set = (k,v) => { setFilters(f=>({...f,[k]:v})); setSelected(new Set()); };
+  const set = (k,v) => setFilters(f=>({...f,[k]:v}));
 
   const filtered = requirements.filter(r => {
-    if (filters.plant    && r.plantId  !== filters.plant)    return false;
-    if (filters.status   && r.status   !== filters.status)   return false;
-    if (filters.priority && r.priority !== filters.priority) return false;
-    if (filters.search   && !r.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    if (filters.plant  && r.plantId  !== filters.plant)   return false;
+    if (filters.status && r.status   !== filters.status)  return false;
+    if (filters.priority&&r.priority!==filters.priority)  return false;
+    if (filters.search && !r.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
     return true;
   });
 
-  // ── selection helpers ──
-  const allFilteredSelected = filtered.length > 0 && filtered.every(r => selected.has(r.id));
-  const someSelected        = selected.size > 0;
-
-  const toggleOne = id => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-
-  const toggleAll = () => {
-    if (allFilteredSelected) {
-      // deselect all filtered
-      setSelected(prev => { const n = new Set(prev); filtered.forEach(r=>n.delete(r.id)); return n; });
-    } else {
-      // select all filtered
-      setSelected(prev => { const n = new Set(prev); filtered.forEach(r=>n.add(r.id)); return n; });
-    }
-  };
-
-  const clearSelection = () => setSelected(new Set());
-
-  // ── CRUD ──
-  const addReq   = form => {
+  const addReq = form => {
     const newR = { ...form, id:`r${Date.now()}`, createdAt:new Date().toISOString(), evidence:[], comments:[] };
     updateRequirements([newR, ...requirements]);
   };
-  const saveEdit  = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
-  const confirmDel= () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
-
-  // ── bulk delete ──
-  const confirmBulkDel = () => {
-    updateRequirements(requirements.filter(r => !selected.has(r.id)));
-    setBulkDelOpen(false);
-    setSelected(new Set());
-    setBulkDelDone(true);
-    setTimeout(() => setBulkDelDone(false), 3000);
-  };
+  const saveEdit = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
+  const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
 
   const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
-  const sub  = dk ? 'text-gray-400' : 'text-gray-500';
+  const sub  = dk?'text-gray-400':'text-gray-500';
 
   return (
     <div className="space-y-5">
-
-      {/* success toast */}
-      {bulkDelDone && (
-        <div className="fixed top-6 right-6 z-50 bg-green-500 text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium flex items-center gap-2">
-          ✅ Requirements deleted successfully
-        </div>
-      )}
-
-      {/* single-delete confirm */}
       <ConfirmModal open={!!delId} message="Delete this requirement permanently?" onConfirm={confirmDel} onCancel={()=>setDelId(null)} />
-
-      {/* bulk-delete confirm */}
-      {bulkDelOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{backdropFilter:'blur(4px)',background:'rgba(0,0,0,0.55)'}}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <div className="text-center mb-5">
-              <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">🗑️</div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Delete {selected.size} Requirement{selected.size!==1?'s':''}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                This will permanently delete <strong>{selected.size}</strong> selected requirement{selected.size!==1?'s':''}. This action cannot be undone.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={()=>setBulkDelOpen(false)}
-                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                Cancel
-              </button>
-              <button onClick={confirmBulkDel}
-                className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors">
-                Delete {selected.size} Item{selected.size!==1?'s':''}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <RequirementModal open={showAdd} onClose={()=>setShowAdd(false)} onSave={addReq} plants={plants} users={users} dk={dk} />
       <RequirementModal open={!!editReq} onClose={()=>setEditReq(null)} onSave={saveEdit} initial={editReq} plants={plants} users={users} dk={dk} />
 
       <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide>
         {viewReq && (() => {
-          const plant    = plants.find(p=>p.id===viewReq.plantId);
+          const plant = plants.find(p=>p.id===viewReq.plantId);
           const assignee = users.find(u=>u.id===viewReq.assignedTo);
           return (
             <div className="space-y-4 text-sm">
               <div className="flex flex-wrap gap-2">
-                <Badge label={viewReq.status}   color={STATUS_CLR[viewReq.status]} />
+                <Badge label={viewReq.status} color={STATUS_CLR[viewReq.status]} />
                 <Badge label={viewReq.priority} color={PRIORITY_CLR[viewReq.priority]} />
                 <Badge label={viewReq.category} color="#6366f1" />
                 <Badge label={`L${viewReq.escalationLevel} Escalation`} color="#8b5cf6" />
@@ -977,7 +867,6 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
         })()}
       </Modal>
 
-      {/* ── Filter Bar ── */}
       <div className={`${card} p-4`}>
         <div className="flex flex-wrap gap-3 items-center">
           <input value={filters.search} onChange={e=>set('search',e.target.value)} placeholder="🔍 Search requirements…"
@@ -1002,57 +891,11 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
         <p className={`text-xs mt-2 ${sub}`}>Showing {filtered.length} of {requirements.length} requirements</p>
       </div>
 
-      {/* ── Bulk-action Bar (appears when rows are selected) ── */}
-      {someSelected && (
-        <div className={`rounded-2xl border px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm
-          ${dk ? 'bg-red-900/20 border-red-800/50' : 'bg-red-50 border-red-200'}`}>
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-              {selected.size}
-            </div>
-            <p className={`text-sm font-semibold ${dk?'text-red-300':'text-red-700'}`}>
-              requirement{selected.size!==1?'s':''} selected
-            </p>
-            <span className={`text-xs ${dk?'text-red-400':'text-red-400'}`}>
-              · {filtered.filter(r=>selected.has(r.id)).length} in current view
-            </span>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={clearSelection}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
-                ${dk?'border-red-700 text-red-300 hover:bg-red-900/40':'border-red-300 text-red-600 hover:bg-red-100'}`}>
-              ✕ Clear selection
-            </button>
-            <button onClick={()=>{ setSelected(new Set(filtered.map(r=>r.id))); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
-                ${dk?'border-red-700 text-red-300 hover:bg-red-900/40':'border-red-300 text-red-600 hover:bg-red-100'}`}>
-              Select all {filtered.length} filtered
-            </button>
-            <button onClick={()=>setBulkDelOpen(true)}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1.5 shadow-sm">
-              🗑️ Delete {selected.size} selected
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Table ── */}
       <div className={`${card} overflow-hidden`}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className={`text-xs uppercase tracking-wide font-semibold ${dk?'bg-gray-700/60 text-gray-400':'bg-gray-50 text-gray-500'}`}>
-                {/* master checkbox */}
-                <th className="px-4 py-3 w-10">
-                  <input
-                    type="checkbox"
-                    checked={allFilteredSelected}
-                    ref={el => { if (el) el.indeterminate = someSelected && !allFilteredSelected; }}
-                    onChange={toggleAll}
-                    className="rounded cursor-pointer w-4 h-4 accent-indigo-600"
-                    title={allFilteredSelected ? 'Deselect all' : 'Select all visible'}
-                  />
-                </th>
                 {['Requirement','Plant','Category','Assigned To','Priority','Status','Due Date','Actions'].map(h=>(
                   <th key={h} className="text-left px-4 py-3 whitespace-nowrap">{h}</th>
                 ))}
@@ -1060,28 +903,14 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
             </thead>
             <tbody className={`divide-y ${dk?'divide-gray-700':'divide-gray-100'}`}>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-12 text-gray-400">No requirements found</td></tr>
+                <tr><td colSpan={8} className="text-center py-12 text-gray-400">No requirements found</td></tr>
               )}
               {filtered.map(req => {
                 const plant    = plants.find(p=>p.id===req.plantId);
                 const assignee = users.find(u=>u.id===req.assignedTo);
                 const dl       = daysLeft(req.dueDate);
-                const isChk    = selected.has(req.id);
                 return (
-                  <tr key={req.id}
-                    className={`transition-colors ${isChk
-                      ? (dk?'bg-red-900/20':'bg-red-50')
-                      : (dk?'hover:bg-gray-700/50':'hover:bg-slate-50')
-                    }`}>
-                    {/* row checkbox */}
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={isChk}
-                        onChange={()=>toggleOne(req.id)}
-                        className="rounded cursor-pointer w-4 h-4 accent-indigo-600"
-                      />
-                    </td>
+                  <tr key={req.id} className={`transition-colors ${dk?'hover:bg-gray-700/50':'hover:bg-slate-50'}`}>
                     <td className="px-4 py-3">
                       <p className="font-medium max-w-[200px] truncate" title={req.title}>{req.title}</p>
                       {req.evidence?.length>0 && <span className={`text-xs ${sub}`}>📎 {req.evidence.length} file(s)</span>}
@@ -1115,18 +944,6 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
             </tbody>
           </table>
         </div>
-
-        {/* table footer summary */}
-        {filtered.length > 0 && (
-          <div className={`px-4 py-2.5 border-t text-xs flex items-center justify-between ${dk?'border-gray-700 text-gray-400':'border-gray-100 text-gray-500'}`}>
-            <span>{filtered.length} requirement{filtered.length!==1?'s':''} shown</span>
-            {someSelected && (
-              <span className={`font-semibold ${dk?'text-red-400':'text-red-600'}`}>
-                {selected.size} selected — <button onClick={()=>setBulkDelOpen(true)} className="underline hover:no-underline">delete selected</button>
-              </span>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1337,14 +1154,14 @@ function AdminSettings({ dk }) {
     ejsToEmail: 'sushil@polyplasticsindia.com',
     ejsEnabled: false,
     // Firebase
-    fbApiKey: '',
-    fbAuthDomain: '',
-    fbProjectId: '',
-    fbStorageBucket: '',
-    fbMessagingSenderId: '',
-    fbAppId: '',
-    fbMeasurementId: '',
-    fbEnabled: false,
+    fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
+    fbAuthDomain: 'skr-task.firebaseapp.com',
+    fbProjectId: 'skr-task',
+    fbStorageBucket: 'skr-task.firebasestorage.app',
+    fbMessagingSenderId: '1011690659933',
+    fbAppId: '1:1011690659933:web:f57e43ee0267a475682db4',
+    fbMeasurementId: 'G-67NGHMK0QR',
+    fbEnabled: true,
   });
   const [fbTestStatus,    setFbTestStatus]    = useState(null);
   const [fbShowSecret,    setFbShowSecret]    = useState(false);
@@ -1361,7 +1178,7 @@ function AdminSettings({ dk }) {
       if (saved) {
         const parsed = JSON.parse(saved.value);
         setSettings(s => ({ ...s, ...parsed, toast: false }));
-        if (parsed.ejsPublicKey) emailjs.init({ publicKey: parsed.ejsPublicKey });
+        if (parsed.ejsPublicKey) emailjs.init(parsed.ejsPublicKey);
       }
     } catch(_) {}
   }, []);
@@ -1371,7 +1188,7 @@ function AdminSettings({ dk }) {
     try {
       const { toast: _t, ...toSave } = settings;
       storage.set('adminSettings', JSON.stringify(toSave));
-      if (settings.ejsPublicKey) emailjs.init({ publicKey: settings.ejsPublicKey });
+      if (settings.ejsPublicKey) emailjs.init(settings.ejsPublicKey);
     } catch(_) {}
     setSettings(s => ({ ...s, toast: true }));
   };
@@ -1383,21 +1200,20 @@ function AdminSettings({ dk }) {
     if (!settings.ejsPublicKey || !settings.ejsServiceId || !settings.ejsTemplateId) {
       setEmailTestMsg('Fill in Public Key, Service ID and Template ID first.');
       setEmailTestStatus('error');
-      setTimeout(()=>setEmailTestStatus(null), 5000);
+      setTimeout(()=>setEmailTestStatus(null), 4000);
       return;
     }
     if (!settings.ejsToEmail) {
       setEmailTestMsg('Enter a recipient email address.');
       setEmailTestStatus('error');
-      setTimeout(()=>setEmailTestStatus(null), 5000);
+      setTimeout(()=>setEmailTestStatus(null), 4000);
       return;
     }
     setEmailTestStatus('sending');
     setEmailTestMsg('');
     try {
-      // Always re-init with the current public key before sending
-      emailjs.init({ publicKey: settings.ejsPublicKey });
-      const result = await emailjs.send(
+      emailjs.init(settings.ejsPublicKey);
+      await emailjs.send(
         settings.ejsServiceId,
         settings.ejsTemplateId,
         {
@@ -1405,47 +1221,31 @@ function AdminSettings({ dk }) {
           to_name:   'Compliance Team',
           from_name: 'LegalComp Pro',
           subject:   'LegalComp Pro – Email Configuration Test',
-          message:   `This is a test email sent from LegalComp Pro on ${new Date().toLocaleString('en-IN')}.\n\nYour EmailJS configuration is working correctly.\n\n— LegalComp Pro Compliance System`,
+          message:   `This is a test email sent from LegalComp Pro on ${new Date().toLocaleString('en-IN')}.\n\nYour email configuration via smtp.office365.com is working correctly.\n\n— LegalComp Pro Compliance System`,
           reply_to:  settings.fromEmail || settings.ejsToEmail,
         }
       );
-      if (result.status === 200) {
-        setEmailTestStatus('success');
-        setEmailTestMsg(`Email delivered to ${settings.ejsToEmail}`);
-      } else {
-        setEmailTestStatus('error');
-        setEmailTestMsg(`Unexpected status ${result.status}: ${result.text}`);
-      }
+      setEmailTestStatus('success');
+      setEmailTestMsg(`Email delivered to ${settings.ejsToEmail}`);
     } catch (err) {
       setEmailTestStatus('error');
-      // Provide actionable error details
-      const status = err?.status;
-      const text   = err?.text || err?.message || JSON.stringify(err);
-      if (status === 400) {
-        setEmailTestMsg(`Bad request (400): Check that your Template variables match — template must use {{to_name}}, {{from_name}}, {{subject}}, {{message}}, {{reply_to}}.`);
-      } else if (status === 401 || status === 403) {
-        setEmailTestMsg(`Auth error (${status}): Public Key is invalid or the Service/Template IDs don't belong to your account.`);
-      } else if (status === 404) {
-        setEmailTestMsg(`Not found (404): Service ID or Template ID is incorrect.`);
-      } else if (status === 422) {
-        setEmailTestMsg(`Unprocessable (422): Your Office 365 SMTP credentials in EmailJS are wrong, or MFA requires an App Password.`);
-      } else {
-        setEmailTestMsg(`Failed (${status||'network'}): ${text}`);
-      }
+      const msg = err?.text || err?.message || JSON.stringify(err);
+      setEmailTestMsg(`Failed: ${msg}`);
     }
-    setTimeout(()=>setEmailTestStatus(null), 8000);
+    setTimeout(()=>setEmailTestStatus(null), 6000);
   };
 
   const testFirebase = async () => {
-    if (!settings.fbApiKey || !settings.fbProjectId) {
-      setFbTestStatus('error'); setTimeout(()=>setFbTestStatus(null),3500); return;
-    }
     setFbTestStatus('testing');
-    await new Promise(r=>setTimeout(r,1800));
-    // Simulate connection test — replace with real Firebase SDK init in production
-    const ok = settings.fbApiKey.length > 8 && settings.fbProjectId.length > 3;
-    setFbTestStatus(ok ? 'success' : 'error');
-    setTimeout(()=>setFbTestStatus(null), 4000);
+    try {
+      // Use the globally initialized Firestore (window.db)
+      await window.db.collection('_ping').limit(1).get();
+      setFbTestStatus('success');
+    } catch (err) {
+      console.error('Firebase test failed:', err);
+      setFbTestStatus('error');
+    }
+    setTimeout(() => setFbTestStatus(null), 4000);
   };
 
   const card = `rounded-2xl border shadow-sm p-6 ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
@@ -2623,7 +2423,39 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
 }
 
 /* ═══════════════════════════════════════════
-   ROOT APP
+   FIREBASE SYNC HELPERS
+   All collections: legalcomp_plants, legalcomp_users, legalcomp_requirements
+   Single-document array pattern — one doc per collection named "data"
+   so the whole array is atomic and cheap on Firestore reads.
+═══════════════════════════════════════════ */
+const FB_PLANTS = 'legalcomp_plants';
+const FB_USERS  = 'legalcomp_users';
+const FB_REQS   = 'legalcomp_requirements';
+
+async function fbLoad(col) {
+  try {
+    const snap = await window.db.collection(col).doc('data').get();
+    if (snap.exists) return snap.data().items || null;
+  } catch(e) { console.warn('fbLoad failed', col, e); }
+  return null;
+}
+
+async function fbSave(col, items) {
+  try {
+    await window.db.collection(col).doc('data').set({ items, updatedAt: new Date().toISOString() });
+  } catch(e) { console.warn('fbSave failed', col, e); }
+}
+
+function fbListen(col, cb) {
+  try {
+    return window.db.collection(col).doc('data').onSnapshot(snap => {
+      if (snap.exists) cb(snap.data().items || []);
+    });
+  } catch(e) { console.warn('fbListen failed', col, e); return () => {}; }
+}
+
+/* ═══════════════════════════════════════════
+   ROOT APP  (Firebase-synced)
 ═══════════════════════════════════════════ */
 function App() {
   const [theme,        setTheme]        = useState('light');
@@ -2633,25 +2465,115 @@ function App() {
   const [users,        setUsers]        = useState(mkUsers);
   const [requirements, setRequirements] = useState(null);
   const [ready,        setReady]        = useState(false);
+  const [syncStatus,   setSyncStatus]   = useState('idle'); // 'idle'|'syncing'|'synced'|'error'
 
+  /* ── 1. Boot: load from Firebase, fall back to localStorage ── */
   useEffect(() => {
-    try {
-      const t = storage.get('theme');        if (t) setTheme(t.value);
-      const p = storage.get('plants');       if (p) setPlants(JSON.parse(p.value));
-      const u = storage.get('users');        if (u) setUsers(JSON.parse(u.value));
-      const r = storage.get('requirements'); if (r) setRequirements(JSON.parse(r.value));
-    } catch(_) {}
-    setReady(true);
+    async function boot() {
+      // Theme from localStorage (UI pref, not synced to Firestore)
+      try {
+        const t = storage.get('theme');
+        if (t) setTheme(t.value);
+      } catch(_) {}
+
+      setSyncStatus('syncing');
+      try {
+        const [fbP, fbU, fbR] = await Promise.all([
+          fbLoad(FB_PLANTS),
+          fbLoad(FB_USERS),
+          fbLoad(FB_REQS),
+        ]);
+
+        // Plants
+        if (fbP && fbP.length > 0) {
+          setPlants(fbP);
+          storage.set('plants', JSON.stringify(fbP));
+        } else {
+          const lsP = storage.get('plants');
+          const p = lsP ? JSON.parse(lsP.value) : mkPlants();
+          setPlants(p);
+          await fbSave(FB_PLANTS, p); // seed Firebase on first run
+        }
+
+        // Users
+        if (fbU && fbU.length > 0) {
+          setUsers(fbU);
+          storage.set('users', JSON.stringify(fbU));
+        } else {
+          const lsU = storage.get('users');
+          const u = lsU ? JSON.parse(lsU.value) : mkUsers();
+          setUsers(u);
+          await fbSave(FB_USERS, u);
+        }
+
+        // Requirements
+        if (fbR && fbR.length > 0) {
+          setRequirements(fbR);
+          storage.set('requirements', JSON.stringify(fbR));
+        } else {
+          const lsR = storage.get('requirements');
+          if (lsR) {
+            const r = JSON.parse(lsR.value);
+            setRequirements(r);
+            await fbSave(FB_REQS, r);
+          }
+          // requirements=null triggers the seed effect below
+        }
+
+        setSyncStatus('synced');
+      } catch(err) {
+        console.error('Boot sync failed, using localStorage', err);
+        setSyncStatus('error');
+        try {
+          const lsP = storage.get('plants');       if (lsP) setPlants(JSON.parse(lsP.value));
+          const lsU = storage.get('users');        if (lsU) setUsers(JSON.parse(lsU.value));
+          const lsR = storage.get('requirements'); if (lsR) setRequirements(JSON.parse(lsR.value));
+        } catch(_) {}
+      }
+
+      setReady(true);
+    }
+    boot();
   }, []);
 
-  useEffect(() => { if (ready && requirements === null) setRequirements(mkRequirements(plants, users)); }, [ready]);
+  /* ── 2. Seed requirements if still null after boot ── */
+  useEffect(() => {
+    if (ready && requirements === null) {
+      const r = mkRequirements(plants, users);
+      setRequirements(r);
+      storage.set('requirements', JSON.stringify(r));
+      fbSave(FB_REQS, r);
+    }
+  }, [ready]);
 
-  const persist    = (key, val) => { try { storage.set(key, JSON.stringify(val)); } catch(_) {} };
+  /* ── 3. Real-time listeners — keep UI in sync across tabs/devices ── */
+  useEffect(() => {
+    if (!ready) return;
+    const unsubP = fbListen(FB_PLANTS, items => {
+      setPlants(items);
+      storage.set('plants', JSON.stringify(items));
+    });
+    const unsubU = fbListen(FB_USERS, items => {
+      setUsers(items);
+      storage.set('users', JSON.stringify(items));
+    });
+    const unsubR = fbListen(FB_REQS, items => {
+      setRequirements(items);
+      storage.set('requirements', JSON.stringify(items));
+    });
+    return () => { unsubP(); unsubU(); unsubR(); };
+  }, [ready]);
+
+  /* ── 4. Persist helpers: write to both localStorage + Firestore ── */
+  const persist    = (key, val, col) => {
+    try { storage.set(key, JSON.stringify(val)); } catch(_) {}
+    if (col) fbSave(col, val);
+  };
   const persistStr = (key, val) => { try { storage.set(key, val); } catch(_) {} };
 
-  const updatePlants       = p => { setPlants(p);       persist('plants', p); };
-  const updateUsers        = u => { setUsers(u);         persist('users', u); };
-  const updateRequirements = r => { setRequirements(r); persist('requirements', r); };
+  const updatePlants       = p => { setPlants(p);       persist('plants',       p, FB_PLANTS); };
+  const updateUsers        = u => { setUsers(u);         persist('users',        u, FB_USERS);  };
+  const updateRequirements = r => { setRequirements(r); persist('requirements', r, FB_REQS);   };
   const toggleTheme = () => { const t=theme==='light'?'dark':'light'; setTheme(t); persistStr('theme',t); };
 
   const login = (email, password) => {
@@ -2674,12 +2596,15 @@ function App() {
       <div className="text-center">
         <div className="w-14 h-14 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
         <p className={`font-semibold ${dk?'text-white':'text-gray-700'}`} style={{fontFamily:"'Outfit',sans-serif"}}>LegalComp Pro</p>
-        <p className="text-sm text-gray-500 mt-1">Initializing…</p>
+        <p className="text-sm text-gray-500 mt-1">
+          {syncStatus === 'syncing' ? '🔥 Syncing with Firebase…' : 'Initializing…'}
+        </p>
       </div>
     </div>
   );
 
-  const ctx = { dk, toggleTheme, currentUser, plants, users, requirements, updatePlants, updateUsers, updateRequirements, logout };
+  const ctx = { dk, toggleTheme, currentUser, plants, users, requirements,
+                updatePlants, updateUsers, updateRequirements, logout, syncStatus };
 
   if (page==='login')          return <LoginPage {...ctx} login={login} />;
   if (page==='admin')          return <AdminDashboard {...ctx} />;
