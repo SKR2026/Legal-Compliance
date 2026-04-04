@@ -1094,7 +1094,27 @@ function AdminSettings({ dk }) {
   const [fbShowSecret, setFbShowSecret] = useState(false);
 
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
-  const save = () => setSettings(s=>({...s,toast:true}));
+
+  // Load persisted settings on mount
+  useEffect(() => {
+    try {
+      const saved = storage.get('adminSettings');
+      if (saved) {
+        const parsed = JSON.parse(saved.value);
+        setSettings(s => ({ ...s, ...parsed, toast: false }));
+      }
+    } catch(_) {}
+  }, []);
+
+  // Save all settings to localStorage and show toast
+  const save = () => {
+    try {
+      const { toast: _t, ...toSave } = settings;
+      storage.set('adminSettings', JSON.stringify(toSave));
+    } catch(_) {}
+    setSettings(s => ({ ...s, toast: true }));
+  };
+
   useEffect(()=>{ if(settings.toast) setTimeout(()=>set('toast',false),3000); },[settings.toast]);
 
   const testFirebase = async () => {
