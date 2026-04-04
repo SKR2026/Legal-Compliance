@@ -837,46 +837,117 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk })
    ADMIN – REQUIREMENTS
 ═══════════════════════════════════════════ */
 function AdminRequirements({ dk, plants, users, requirements, updateRequirements }) {
-  const [filters, setFilters]   = useState({ plant:'', status:'', priority:'', search:'' });
-  const [showAdd, setShowAdd]   = useState(false);
-  const [editReq, setEditReq]   = useState(null);
-  const [viewReq, setViewReq]   = useState(null);
-  const [delId,   setDelId]     = useState(null);
+  const [filters,      setFilters]      = useState({ plant:'', status:'', priority:'', search:'' });
+  const [showAdd,      setShowAdd]      = useState(false);
+  const [editReq,      setEditReq]      = useState(null);
+  const [viewReq,      setViewReq]      = useState(null);
+  const [delId,        setDelId]        = useState(null);
+  // bulk-select state
+  const [selected,     setSelected]     = useState(new Set());   // Set of req IDs
+  const [bulkDelOpen,  setBulkDelOpen]  = useState(false);
+  const [bulkDelDone,  setBulkDelDone]  = useState(false);       // success toast
 
-  const set = (k,v) => setFilters(f=>({...f,[k]:v}));
+  const set = (k,v) => { setFilters(f=>({...f,[k]:v})); setSelected(new Set()); };
 
   const filtered = requirements.filter(r => {
-    if (filters.plant  && r.plantId  !== filters.plant)   return false;
-    if (filters.status && r.status   !== filters.status)  return false;
-    if (filters.priority&&r.priority!==filters.priority)  return false;
-    if (filters.search && !r.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    if (filters.plant    && r.plantId  !== filters.plant)    return false;
+    if (filters.status   && r.status   !== filters.status)   return false;
+    if (filters.priority && r.priority !== filters.priority) return false;
+    if (filters.search   && !r.title.toLowerCase().includes(filters.search.toLowerCase())) return false;
     return true;
   });
 
-  const addReq = form => {
+  // ── selection helpers ──
+  const allFilteredSelected = filtered.length > 0 && filtered.every(r => selected.has(r.id));
+  const someSelected        = selected.size > 0;
+
+  const toggleOne = id => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      // deselect all filtered
+      setSelected(prev => { const n = new Set(prev); filtered.forEach(r=>n.delete(r.id)); return n; });
+    } else {
+      // select all filtered
+      setSelected(prev => { const n = new Set(prev); filtered.forEach(r=>n.add(r.id)); return n; });
+    }
+  };
+
+  const clearSelection = () => setSelected(new Set());
+
+  // ── CRUD ──
+  const addReq   = form => {
     const newR = { ...form, id:`r${Date.now()}`, createdAt:new Date().toISOString(), evidence:[], comments:[] };
     updateRequirements([newR, ...requirements]);
   };
-  const saveEdit = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
-  const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
+  const saveEdit  = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
+  const confirmDel= () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
+
+  // ── bulk delete ──
+  const confirmBulkDel = () => {
+    updateRequirements(requirements.filter(r => !selected.has(r.id)));
+    setBulkDelOpen(false);
+    setSelected(new Set());
+    setBulkDelDone(true);
+    setTimeout(() => setBulkDelDone(false), 3000);
+  };
 
   const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
-  const sub  = dk?'text-gray-400':'text-gray-500';
+  const sub  = dk ? 'text-gray-400' : 'text-gray-500';
 
   return (
     <div className="space-y-5">
+
+      {/* success toast */}
+      {bulkDelDone && (
+        <div className="fixed top-6 right-6 z-50 bg-green-500 text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium flex items-center gap-2">
+          ✅ Requirements deleted successfully
+        </div>
+      )}
+
+      {/* single-delete confirm */}
       <ConfirmModal open={!!delId} message="Delete this requirement permanently?" onConfirm={confirmDel} onCancel={()=>setDelId(null)} />
+
+      {/* bulk-delete confirm */}
+      {bulkDelOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{backdropFilter:'blur(4px)',background:'rgba(0,0,0,0.55)'}}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="text-center mb-5">
+              <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">🗑️</div>
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Delete {selected.size} Requirement{selected.size!==1?'s':''}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                This will permanently delete <strong>{selected.size}</strong> selected requirement{selected.size!==1?'s':''}. This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={()=>setBulkDelOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+              </button>
+              <button onClick={confirmBulkDel}
+                className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors">
+                Delete {selected.size} Item{selected.size!==1?'s':''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <RequirementModal open={showAdd} onClose={()=>setShowAdd(false)} onSave={addReq} plants={plants} users={users} dk={dk} />
       <RequirementModal open={!!editReq} onClose={()=>setEditReq(null)} onSave={saveEdit} initial={editReq} plants={plants} users={users} dk={dk} />
 
       <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide>
         {viewReq && (() => {
-          const plant = plants.find(p=>p.id===viewReq.plantId);
+          const plant    = plants.find(p=>p.id===viewReq.plantId);
           const assignee = users.find(u=>u.id===viewReq.assignedTo);
           return (
             <div className="space-y-4 text-sm">
               <div className="flex flex-wrap gap-2">
-                <Badge label={viewReq.status} color={STATUS_CLR[viewReq.status]} />
+                <Badge label={viewReq.status}   color={STATUS_CLR[viewReq.status]} />
                 <Badge label={viewReq.priority} color={PRIORITY_CLR[viewReq.priority]} />
                 <Badge label={viewReq.category} color="#6366f1" />
                 <Badge label={`L${viewReq.escalationLevel} Escalation`} color="#8b5cf6" />
@@ -906,6 +977,7 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
         })()}
       </Modal>
 
+      {/* ── Filter Bar ── */}
       <div className={`${card} p-4`}>
         <div className="flex flex-wrap gap-3 items-center">
           <input value={filters.search} onChange={e=>set('search',e.target.value)} placeholder="🔍 Search requirements…"
@@ -930,11 +1002,57 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
         <p className={`text-xs mt-2 ${sub}`}>Showing {filtered.length} of {requirements.length} requirements</p>
       </div>
 
+      {/* ── Bulk-action Bar (appears when rows are selected) ── */}
+      {someSelected && (
+        <div className={`rounded-2xl border px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm
+          ${dk ? 'bg-red-900/20 border-red-800/50' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+              {selected.size}
+            </div>
+            <p className={`text-sm font-semibold ${dk?'text-red-300':'text-red-700'}`}>
+              requirement{selected.size!==1?'s':''} selected
+            </p>
+            <span className={`text-xs ${dk?'text-red-400':'text-red-400'}`}>
+              · {filtered.filter(r=>selected.has(r.id)).length} in current view
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={clearSelection}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                ${dk?'border-red-700 text-red-300 hover:bg-red-900/40':'border-red-300 text-red-600 hover:bg-red-100'}`}>
+              ✕ Clear selection
+            </button>
+            <button onClick={()=>{ setSelected(new Set(filtered.map(r=>r.id))); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                ${dk?'border-red-700 text-red-300 hover:bg-red-900/40':'border-red-300 text-red-600 hover:bg-red-100'}`}>
+              Select all {filtered.length} filtered
+            </button>
+            <button onClick={()=>setBulkDelOpen(true)}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1.5 shadow-sm">
+              🗑️ Delete {selected.size} selected
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Table ── */}
       <div className={`${card} overflow-hidden`}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className={`text-xs uppercase tracking-wide font-semibold ${dk?'bg-gray-700/60 text-gray-400':'bg-gray-50 text-gray-500'}`}>
+                {/* master checkbox */}
+                <th className="px-4 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected && !allFilteredSelected; }}
+                    onChange={toggleAll}
+                    className="rounded cursor-pointer w-4 h-4 accent-indigo-600"
+                    title={allFilteredSelected ? 'Deselect all' : 'Select all visible'}
+                  />
+                </th>
                 {['Requirement','Plant','Category','Assigned To','Priority','Status','Due Date','Actions'].map(h=>(
                   <th key={h} className="text-left px-4 py-3 whitespace-nowrap">{h}</th>
                 ))}
@@ -942,14 +1060,28 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
             </thead>
             <tbody className={`divide-y ${dk?'divide-gray-700':'divide-gray-100'}`}>
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-12 text-gray-400">No requirements found</td></tr>
+                <tr><td colSpan={9} className="text-center py-12 text-gray-400">No requirements found</td></tr>
               )}
               {filtered.map(req => {
                 const plant    = plants.find(p=>p.id===req.plantId);
                 const assignee = users.find(u=>u.id===req.assignedTo);
                 const dl       = daysLeft(req.dueDate);
+                const isChk    = selected.has(req.id);
                 return (
-                  <tr key={req.id} className={`transition-colors ${dk?'hover:bg-gray-700/50':'hover:bg-slate-50'}`}>
+                  <tr key={req.id}
+                    className={`transition-colors ${isChk
+                      ? (dk?'bg-red-900/20':'bg-red-50')
+                      : (dk?'hover:bg-gray-700/50':'hover:bg-slate-50')
+                    }`}>
+                    {/* row checkbox */}
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={isChk}
+                        onChange={()=>toggleOne(req.id)}
+                        className="rounded cursor-pointer w-4 h-4 accent-indigo-600"
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <p className="font-medium max-w-[200px] truncate" title={req.title}>{req.title}</p>
                       {req.evidence?.length>0 && <span className={`text-xs ${sub}`}>📎 {req.evidence.length} file(s)</span>}
@@ -983,6 +1115,18 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
             </tbody>
           </table>
         </div>
+
+        {/* table footer summary */}
+        {filtered.length > 0 && (
+          <div className={`px-4 py-2.5 border-t text-xs flex items-center justify-between ${dk?'border-gray-700 text-gray-400':'border-gray-100 text-gray-500'}`}>
+            <span>{filtered.length} requirement{filtered.length!==1?'s':''} shown</span>
+            {someSelected && (
+              <span className={`font-semibold ${dk?'text-red-400':'text-red-600'}`}>
+                {selected.size} selected — <button onClick={()=>setBulkDelOpen(true)} className="underline hover:no-underline">delete selected</button>
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
