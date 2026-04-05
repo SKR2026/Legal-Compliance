@@ -93,12 +93,15 @@ const PRIORITIES  = ['Critical','High','Medium','Low'];
 const STATUSES    = ['Pending','In Progress','Completed','Overdue'];
 const REM_FREQS   = ['Daily','Weekly','Bi-Weekly','Monthly'];
 const IND_STATES  = ['Maharashtra','Gujarat','Tamil Nadu','Karnataka','Rajasthan','West Bengal','Uttar Pradesh','Telangana','Andhra Pradesh','Punjab','Madhya Pradesh','Odisha','Haryana'];
+const ALL_IND_STATES = IND_STATES; // full list for dropdowns
 const ESC_LABELS  = ['Level 1 – Plant Head','Level 2 – Regional Manager','Level 3 – Top Management'];
 
 /* ─── DEFAULT DATA ─── */
-const mkPlants = () => IND_STATES.map((st, i) => ({
-  id:`p${i+1}`, name:`Plant ${String.fromCharCode(65+i)}`, state:st, active:true
-}));
+const mkPlants = () => [
+  { id:'p1', name:'Plant A', state:'Maharashtra', active:true },
+  { id:'p2', name:'Plant B', state:'Gujarat',     active:true },
+  { id:'p3', name:'Plant C', state:'Tamil Nadu',  active:true },
+];
 
 const mkUsers = () => [
   { id:'admin1', name:'Super Admin',    email:'admin@legalcomp.com',  password:'Admin@123', role:'admin',          plantId:null, dept:'Management',    phone:'+91-9000000001' },
@@ -386,7 +389,7 @@ function LoginPage({ login }) {
             Track, manage, and automate compliance requirements across all your plants — from factory licenses to environmental clearances.
           </p>
           <div className="grid grid-cols-2 gap-3">
-            {[['📊','Advanced Analytics'],['🏭','12 Plant Support'],['🔔','Auto Reminders'],['🔐','Role-Based Access'],['📎','Evidence Management'],['⚡','Escalation Engine']].map(([i,l])=>(
+            {[['📊','Advanced Analytics'],['🏭','Multi-Plant Support'],['🔔','Auto Reminders'],['🔐','Role-Based Access'],['📎','Evidence Management'],['⚡','Escalation Engine']].map(([i,l])=>(
               <div key={l} className="flex items-center gap-2.5 bg-white/5 rounded-xl px-3.5 py-2.5 border border-white/10">
                 <span className="text-base">{i}</span>
                 <span className="text-slate-300 text-xs font-medium">{l}</span>
@@ -712,6 +715,7 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
  * sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy })
  *
  * trigger: 'new_requirement' | 'status_change' | 'new_assignment' | 'reassignment'
+ *          | 'plant_added' | 'plant_deleted'
  *
  * Reads EmailJS credentials from localStorage so it works from any component.
  * Sends to:
@@ -732,27 +736,27 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
     const plantLabel    = plant    ? `${plant.name} (${plant.state})`                 : '—';
     const assigneeLabel = assignee ? `${assignee.name} <${assignee.email}>`            : 'Unassigned';
     const byLabel       = changedBy? `${changedBy.name} <${changedBy.email}>`          : 'System';
-    const dateLabel     = req.dueDate ? new Date(req.dueDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+    const dateLabel     = req?.dueDate ? new Date(req.dueDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 
     // ── Build subject + body per trigger ──────────────────────────────────
     let subject, body, toName;
 
     if (trigger === 'new_requirement') {
-      subject = `[LegalComp] New Requirement: ${req.title}`;
+      subject = `[LegalComp] New Requirement: ${req?.title}`;
       toName  = 'Compliance Team';
       body = [
         `A new compliance requirement has been created.`,
         ``,
-        `Title      : ${req.title}`,
+        `Title      : ${req?.title}`,
         `Plant      : ${plantLabel}`,
-        `Category   : ${req.category}`,
-        `Priority   : ${req.priority}`,
-        `Status     : ${req.status}`,
+        `Category   : ${req?.category}`,
+        `Priority   : ${req?.priority}`,
+        `Status     : ${req?.status}`,
         `Due Date   : ${dateLabel}`,
         `Assigned To: ${assigneeLabel}`,
-        `Reminder   : ${req.reminderFrequency}`,
-        req.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
-        req.description     ? `\nDetails    : ${req.description}`   : null,
+        req?.reminderFrequency ? `Reminder   : ${req.reminderFrequency}` : null,
+        req?.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
+        req?.description     ? `\nDetails    : ${req.description}`   : null,
         ``,
         `Created by : ${byLabel}`,
         ``,
@@ -760,17 +764,17 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
       ].filter(l => l !== null).join('\n');
 
     } else if (trigger === 'status_change') {
-      subject = `[LegalComp] Status Updated → ${req.status}: ${req.title}`;
+      subject = `[LegalComp] Status Updated → ${req?.status}: ${req?.title}`;
       toName  = assignee ? assignee.name : 'Compliance Team';
       body = [
         `The status of a compliance requirement has been updated.`,
         ``,
-        `Title      : ${req.title}`,
+        `Title      : ${req?.title}`,
         `Plant      : ${plantLabel}`,
-        `Category   : ${req.category}`,
-        `Priority   : ${req.priority}`,
+        `Category   : ${req?.category}`,
+        `Priority   : ${req?.priority}`,
         `Old Status : ${oldStatus}`,
-        `New Status : ${req.status}`,
+        `New Status : ${req?.status}`,
         `Due Date   : ${dateLabel}`,
         `Assigned To: ${assigneeLabel}`,
         ``,
@@ -780,19 +784,19 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
       ].join('\n');
 
     } else if (trigger === 'new_assignment') {
-      subject = `[LegalComp] New Task Assigned: ${req.title}`;
+      subject = `[LegalComp] New Task Assigned: ${req?.title}`;
       toName  = assignee ? assignee.name : 'Compliance Team';
       body = [
         `A compliance requirement has been assigned to you.`,
         ``,
-        `Title      : ${req.title}`,
+        `Title      : ${req?.title}`,
         `Plant      : ${plantLabel}`,
-        `Category   : ${req.category}`,
-        `Priority   : ${req.priority}`,
-        `Status     : ${req.status}`,
+        `Category   : ${req?.category}`,
+        `Priority   : ${req?.priority}`,
+        `Status     : ${req?.status}`,
         `Due Date   : ${dateLabel}`,
-        `Reminder   : ${req.reminderFrequency}`,
-        req.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
+        `Reminder   : ${req?.reminderFrequency}`,
+        req?.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
         ``,
         `Assigned by: ${byLabel}`,
         ``,
@@ -801,16 +805,16 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
 
     } else if (trigger === 'reassignment') {
       const oldLabel = oldAssignee ? `${oldAssignee.name} <${oldAssignee.email}>` : 'Unassigned';
-      subject = `[LegalComp] Reassigned: ${req.title}`;
+      subject = `[LegalComp] Reassigned: ${req?.title}`;
       toName  = 'Compliance Team';
       body = [
         `A compliance requirement has been reassigned.`,
         ``,
-        `Title        : ${req.title}`,
+        `Title        : ${req?.title}`,
         `Plant        : ${plantLabel}`,
-        `Category     : ${req.category}`,
-        `Priority     : ${req.priority}`,
-        `Status       : ${req.status}`,
+        `Category     : ${req?.category}`,
+        `Priority     : ${req?.priority}`,
+        `Status       : ${req?.status}`,
         `Due Date     : ${dateLabel}`,
         `Previous     : ${oldLabel}`,
         `Now Assigned : ${assigneeLabel}`,
@@ -819,6 +823,51 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
         ``,
         `— LegalComp Pro Compliance System`,
       ].join('\n');
+    } else if (trigger === 'plant_added') {
+      subject = `[LegalComp] New Plant Added: ${plant?.name}`;
+      toName  = 'Compliance Team';
+      body = [
+        `A new plant location has been added to the LegalComp system.`,
+        ``,
+        `Plant Name : ${plant?.name || '—'}`,
+        `State      : ${plant?.state || '—'}`,
+        `Plant ID   : ${plant?.id || '—'}`,
+        ``,
+        `Added by   : ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].join('\n');
+
+    } else if (trigger === 'plant_deleted') {
+      subject = `[LegalComp] Plant Removed: ${plant?.name}`;
+      toName  = 'Compliance Team';
+      body = [
+        `A plant location has been removed from the LegalComp system.`,
+        ``,
+        `Plant Name : ${plant?.name || '—'}`,
+        `State      : ${plant?.state || '—'}`,
+        `Plant ID   : ${plant?.id || '—'}`,
+        ``,
+        `Removed by : ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].join('\n');
+
+    } else if (trigger === 'plant_updated') {
+      subject = `[LegalComp] Plant Updated: ${plant?.name}`;
+      toName  = 'Compliance Team';
+      body = [
+        `A plant location has been updated in the LegalComp system.`,
+        ``,
+        `Plant Name : ${plant?.name || '—'}`,
+        `State      : ${plant?.state || '—'}`,
+        `Plant ID   : ${plant?.id || '—'}`,
+        ``,
+        `Updated by : ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].join('\n');
+
     } else {
       return;
     }
@@ -1378,17 +1427,85 @@ function AdminUsers({ dk, plants, users, updateUsers }) {
 }
 
 /* ═══════════════════════════════════════════
-   ADMIN – PLANTS
+   ADMIN – PLANTS  (Add / Edit / Delete + State Mgmt)
 ═══════════════════════════════════════════ */
-function AdminPlants({ dk, plants, updatePlants }) {
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({});
+function AdminPlants({ dk, plants, updatePlants, currentUser }) {
+  const [editing,    setEditing]    = useState(null);
+  const [form,       setForm]       = useState({});
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [addForm,    setAddForm]    = useState({ name:'', state: ALL_IND_STATES[0] });
+  const [delId,      setDelId]      = useState(null);
+  /* ── State management ── */
+  const [activeTab,  setActiveTab]  = useState('plants'); // 'plants' | 'states'
+  const [customStates, setCustomStates] = useState(() => {
+    try { const s = localStorage.getItem('customStates'); return s ? JSON.parse(s) : []; } catch(_) { return []; }
+  });
+  const [newState,   setNewState]   = useState('');
+  const [editStateIdx, setEditStateIdx] = useState(null);
+  const [editStateVal, setEditStateVal] = useState('');
+  const [delStateIdx,  setDelStateIdx]  = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const allStates = [...ALL_IND_STATES, ...customStates];
+
+  const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+
+  const saveCustomStates = (arr) => {
+    setCustomStates(arr);
+    try { localStorage.setItem('customStates', JSON.stringify(arr)); } catch(_) {}
+  };
 
   const startEdit = p => { setEditing(p.id); setForm({ name:p.name, state:p.state }); };
   const saveEdit  = id => {
     if (!form.name.trim()) return;
-    updatePlants(plants.map(p=>p.id===id?{...p,...form}:p));
+    const updatedPlant = { ...plants.find(p=>p.id===id), ...form };
+    updatePlants(plants.map(p=>p.id===id?updatedPlant:p));
     setEditing(null);
+    showToast('Plant updated');
+    sendComplianceMail({ trigger:'plant_updated', plant:updatedPlant, req:null, assignee:null, changedBy:currentUser });
+  };
+
+  const addPlant = () => {
+    if (!addForm.name.trim()) return;
+    const newP = { id:`p${Date.now()}`, name:addForm.name.trim(), state:addForm.state, active:true };
+    updatePlants([...plants, newP]);
+    setAddForm({ name:'', state: ALL_IND_STATES[0] });
+    setShowAdd(false);
+    showToast(`"${newP.name}" added`);
+    sendComplianceMail({ trigger:'plant_added', plant:newP, req:null, assignee:null, changedBy:currentUser });
+  };
+
+  const confirmDel = () => {
+    const deletedPlant = plants.find(p=>p.id===delId);
+    updatePlants(plants.filter(p=>p.id!==delId));
+    setDelId(null);
+    showToast('Plant deleted');
+    if (deletedPlant) sendComplianceMail({ trigger:'plant_deleted', plant:deletedPlant, req:null, assignee:null, changedBy:currentUser });
+  };
+
+  /* ── State CRUD ── */
+  const addState = () => {
+    const t = newState.trim();
+    if (!t) return;
+    if (allStates.map(s=>s.toLowerCase()).includes(t.toLowerCase())) { showToast('State already exists','error'); return; }
+    saveCustomStates([...customStates, t]);
+    setNewState('');
+    showToast(`"${t}" added`);
+  };
+  const startEditState = (i) => { setEditStateIdx(i); setEditStateVal(customStates[i]); };
+  const saveEditState  = () => {
+    const t = editStateVal.trim();
+    if (!t) return;
+    const updated = customStates.map((s,i)=>i===editStateIdx?t:s);
+    saveCustomStates(updated);
+    setEditStateIdx(null);
+    showToast('State updated');
+  };
+  const confirmDelState = () => {
+    const removed = customStates[delStateIdx];
+    saveCustomStates(customStates.filter((_,i)=>i!==delStateIdx));
+    setDelStateIdx(null);
+    showToast(`"${removed}" deleted`);
   };
 
   const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
@@ -1396,52 +1513,199 @@ function AdminPlants({ dk, plants, updatePlants }) {
 
   return (
     <div className="space-y-5">
-      <div className={`${card} p-4`}>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          🏭 Manage all 12 plant locations. Click <strong>Edit</strong> to update plant names and associated states.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {plants.map((plant, idx) => (
-          <div key={plant.id} className={`${card} p-5`}>
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white font-bold text-sm">
-                  {String.fromCharCode(65+idx)}
-                </div>
-                <div>
-                  <p className={`text-xs font-semibold ${sub} uppercase tracking-wide`}>Plant {String.fromCharCode(65+idx)}</p>
-                  <p className="font-semibold text-sm">{plant.name}</p>
-                </div>
-              </div>
-              <button onClick={()=>startEdit(plant)}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors border border-indigo-100">
-                ✏️ Edit
-              </button>
-            </div>
-            <p className={`text-xs flex items-center gap-1.5 mb-4 ${sub}`}><span>📍</span>{plant.state}</p>
+      <ConfirmModal open={!!delId}
+        message={`Delete this plant? All associated requirements will lose their plant reference.`}
+        onConfirm={confirmDel} onCancel={()=>setDelId(null)} />
+      <ConfirmModal open={delStateIdx!==null}
+        message={delStateIdx!==null ? `Delete state "${customStates[delStateIdx]}"? Plants using it will retain their state label.` : ''}
+        onConfirm={confirmDelState} onCancel={()=>setDelStateIdx(null)} />
 
-            {editing === plant.id && (
-              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-3">
+      {toast && (
+        <div className={`fixed top-5 right-5 z-[100] px-5 py-3 rounded-xl shadow-xl text-sm font-semibold flex items-center gap-2 ${toast.type==='error'?'bg-red-500 text-white':'bg-green-500 text-white'}`}>
+          {toast.type==='error'?'❌':'✅'} {toast.msg}
+        </div>
+      )}
+
+      {/* Tab Switcher */}
+      <div className={`${card} p-4`}>
+        <div className="flex gap-2">
+          {[['plants','🏭 Plants'],['states','📍 States']].map(([id,label])=>(
+            <button key={id} onClick={()=>setActiveTab(id)}
+              className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all ${activeTab===id?'bg-indigo-600 text-white shadow':'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── PLANTS TAB ── */}
+      {activeTab==='plants' && (
+        <>
+          {/* Add Plant button */}
+          <div className={`${card} p-4 flex items-center justify-between`}>
+            <p className={`text-sm ${sub}`}>
+              🏭 {plants.length} plant{plants.length!==1?'s':''} configured
+            </p>
+            <button onClick={()=>setShowAdd(v=>!v)}
+              className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-md shadow-indigo-200">
+              {showAdd?'✕ Cancel':'+ Add Plant'}
+            </button>
+          </div>
+
+          {/* Add Plant Form */}
+          {showAdd && (
+            <div className={`${card} p-5 space-y-4`}>
+              <h3 className="font-semibold text-sm" style={{fontFamily:"'Outfit',sans-serif"}}>Add New Plant</h3>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>Plant Name</label>
-                  <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} className={inputCls} placeholder="Plant name" />
+                  <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>Plant Name *</label>
+                  <input value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))}
+                    placeholder="e.g. Plant D" className={inputCls} />
                 </div>
                 <div>
-                  <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>State</label>
-                  <select value={form.state} onChange={e=>setForm(f=>({...f,state:e.target.value}))} className={selectCls}>
-                    {IND_STATES.map(s=><option key={s}>{s}</option>)}
+                  <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>State *</label>
+                  <select value={addForm.state} onChange={e=>setAddForm(f=>({...f,state:e.target.value}))} className={selectCls}>
+                    {allStates.map(s=><option key={s}>{s}</option>)}
                   </select>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={()=>setEditing(null)} className={`flex-1 py-2 rounded-xl text-xs border transition-colors ${dk?'border-gray-600 hover:bg-gray-700 text-gray-300':'border-gray-200 hover:bg-gray-50 text-gray-700'}`}>Cancel</button>
-                  <button onClick={()=>saveEdit(plant.id)} className="flex-1 py-2 rounded-xl text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-colors font-medium">Save</button>
-                </div>
               </div>
-            )}
+              <div className="flex gap-3">
+                <button onClick={()=>setShowAdd(false)}
+                  className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:bg-gray-700':'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>Cancel</button>
+                <button onClick={addPlant} disabled={!addForm.name.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-md shadow-indigo-200">
+                  Add Plant
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Plants Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {plants.map((plant, idx) => (
+              <div key={plant.id} className={`${card} p-5`}>
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white font-bold text-sm">
+                      {plant.name.charAt(plant.name.length-1) || String.fromCharCode(65+idx)}
+                    </div>
+                    <div>
+                      <p className={`text-xs font-semibold ${sub} uppercase tracking-wide`}>{plant.id}</p>
+                      <p className="font-semibold text-sm">{plant.name}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={()=>startEdit(plant)}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${dk?'hover:bg-amber-900/30 text-amber-400':'hover:bg-amber-50 text-amber-600'}`} title="Edit">✏️</button>
+                    <button onClick={()=>setDelId(plant.id)}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${dk?'hover:bg-red-900/30 text-red-400':'hover:bg-red-50 text-red-500'}`} title="Delete">🗑️</button>
+                  </div>
+                </div>
+                <p className={`text-xs flex items-center gap-1.5 mb-3 ${sub}`}><span>📍</span>{plant.state}</p>
+
+                {editing === plant.id && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-3">
+                    <div>
+                      <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>Plant Name</label>
+                      <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} className={inputCls} placeholder="Plant name" />
+                    </div>
+                    <div>
+                      <label className={`text-xs font-semibold ${sub} uppercase tracking-wide block mb-1`}>State</label>
+                      <select value={form.state} onChange={e=>setForm(f=>({...f,state:e.target.value}))} className={selectCls}>
+                        {allStates.map(s=><option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={()=>setEditing(null)} className={`flex-1 py-2 rounded-xl text-xs border transition-colors ${dk?'border-gray-600 hover:bg-gray-700 text-gray-300':'border-gray-200 hover:bg-gray-50 text-gray-700'}`}>Cancel</button>
+                      <button onClick={()=>saveEdit(plant.id)} className="flex-1 py-2 rounded-xl text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-colors font-medium">Save</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
+
+      {/* ── STATES TAB ── */}
+      {activeTab==='states' && (
+        <div className="space-y-4">
+          {/* Info */}
+          <div className={`p-4 rounded-2xl border flex items-start gap-3 ${dk?'bg-indigo-900/20 border-indigo-700/40':'bg-indigo-50 border-indigo-100'}`}>
+            <span className="text-xl mt-0.5">📍</span>
+            <div>
+              <p className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">State Management</p>
+              <p className={`text-xs mt-0.5 ${sub}`}>
+                Default Indian states are built-in. Add custom states below for international or union territory locations.
+                Deleting a custom state won't affect plants already assigned to it.
+              </p>
+            </div>
+          </div>
+
+          {/* Add new state */}
+          <div className={`${card} p-5`}>
+            <h3 className="font-semibold text-sm mb-3" style={{fontFamily:"'Outfit',sans-serif"}}>Add Custom State / Region</h3>
+            <div className="flex gap-3">
+              <input value={newState} onChange={e=>setNewState(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addState()}
+                placeholder="e.g. Goa, Pondicherry, Delhi NCT…" className={`${inputCls} flex-1`} />
+              <button onClick={addState} disabled={!newState.trim()}
+                className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40 transition-colors shadow-md shadow-indigo-200 flex-shrink-0">
+                + Add
+              </button>
+            </div>
+          </div>
+
+          {/* Built-in states */}
+          <div className={`${card} overflow-hidden`}>
+            <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+              <h3 className="font-semibold text-sm">Built-in States ({ALL_IND_STATES.length})</h3>
+              <p className={`text-xs mt-0.5 ${sub}`}>These are pre-configured and cannot be deleted.</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2 p-4">
+              {ALL_IND_STATES.map(s=>(
+                <div key={s} className={`px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 ${dk?'bg-gray-700 text-gray-300':'bg-gray-50 text-gray-600'}`}>
+                  <span className="text-indigo-400">📍</span>{s}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom states */}
+          {customStates.length > 0 && (
+            <div className={`${card} overflow-hidden`}>
+              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                <h3 className="font-semibold text-sm">Custom States / Regions ({customStates.length})</h3>
+              </div>
+              <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                {customStates.map((st, i) => (
+                  <div key={i} className={`flex items-center gap-3 px-5 py-3.5 transition-colors ${dk?'hover:bg-gray-700/40':'hover:bg-gray-50'}`}>
+                    <span className="text-amber-500">📍</span>
+                    {editStateIdx === i ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input value={editStateVal} onChange={e=>setEditStateVal(e.target.value)}
+                          onKeyDown={e=>{ if(e.key==='Enter') saveEditState(); if(e.key==='Escape') setEditStateIdx(null); }}
+                          autoFocus className={`${inputCls} flex-1 py-1.5 text-sm`} />
+                        <button onClick={saveEditState} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors">Save</button>
+                        <button onClick={()=>setEditStateIdx(null)} className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${dk?'border-gray-600 text-gray-300 hover:bg-gray-700':'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="flex-1 text-sm font-medium">{st}</span>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={()=>startEditState(i)}
+                            className={`p-1.5 rounded-lg text-xs transition-colors ${dk?'hover:bg-amber-900/30 text-amber-400':'hover:bg-amber-50 text-amber-600'}`} title="Edit">✏️</button>
+                          <button onClick={()=>setDelStateIdx(i)}
+                            className={`p-1.5 rounded-lg text-xs transition-colors ${dk?'hover:bg-red-900/30 text-red-400':'hover:bg-red-50 text-red-500'}`} title="Delete">🗑️</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2533,7 +2797,7 @@ function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requireme
     requirements: <AdminRequirements dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} categories={categories} />,
     bulk:         <BulkUpload dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} categories={categories} />,
     users:        <AdminUsers dk={dk} plants={plants} users={users} updateUsers={updateUsers} />,
-    plants:       <AdminPlants dk={dk} plants={plants} updatePlants={updatePlants} />,
+    plants:       <AdminPlants dk={dk} plants={plants} updatePlants={updatePlants} currentUser={currentUser} />,
     categories:   <AdminCategories dk={dk} categories={categories} updateCategories={updateCategories} />,
     settings:     <AdminSettings dk={dk} />,
   };
