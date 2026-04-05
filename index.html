@@ -123,6 +123,20 @@ const mkRequirements = (plants, users) => {
     'Hazardous Waste Authorization','Electrical Safety Audit','Labor Law Compliance Check',
     'Boiler Inspection Certificate',
   ];
+  const APPLICABLE_RULES = [
+    'Factories Act, 1948 – Section 6 & 7',
+    'Environment Protection Act, 1986 – Rule 5',
+    'Fire Services Act – Rule 12 & 13',
+    'Employees State Insurance Act, 1948 – Section 40',
+    'Employees Provident Fund Act, 1952 – Section 7A',
+  ];
+  const LEGAL_CLAUSES = [
+    'License to be obtained before commencement of operations; renewal within 30 days of expiry.',
+    'NOC mandatory from State Pollution Control Board; compliance with Schedule I & II standards.',
+    'Fire NOC required as per National Building Code; renewal on change of occupancy or layout.',
+    'Monthly ESI contribution challan to be filed by 21st of succeeding month; Form 5 annually.',
+    'Annual Return (Form 3A/6A) to be filed by 30th April each year; monthly challan by 15th.',
+  ];
   const reqs = []; let n = 1;
   plants.forEach((plant, pi) => {
     const pu = users.filter(u => u.plantId === plant.id && u.role === 'user');
@@ -140,6 +154,8 @@ const mkRequirements = (plants, users) => {
         reminderFrequency: REM_FREQS[ti % 4],
         escalationLevel: (ti % 3) + 1,
         escalationEmail: 'ceo@legalcomp.com',
+        applicableRule: APPLICABLE_RULES[ti % APPLICABLE_RULES.length],
+        legalClause: LEGAL_CLAUSES[ti % LEGAL_CLAUSES.length],
         createdAt: new Date(Date.now() - ti * 7 * 86400000).toISOString(),
         evidence: ti < 2 ? [{ id:'ev1', name:'Compliance_Certificate.pdf', size:'245 KB', uploadedAt: new Date().toISOString(), uploadedBy: pu[0]?.id }] : [],
         comments: ti === 0 ? [{ id:'c1', text:'Submitted to PCB office, awaiting acknowledgment.', userId: pu[0]?.id, createdAt: new Date().toISOString() }] : []
@@ -948,7 +964,7 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
 ═══════════════════════════════════════════ */
 function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, categories: catsProp }) {
   const cats = catsProp || CATEGORIES;
-  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', assignedTo:'', status:'Pending', dueDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'' };
+  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', assignedTo:'', status:'Pending', dueDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'', applicableRule:'', legalClause:'' };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   useEffect(()=>{ setForm(initial || blank); }, [open]);
@@ -1021,6 +1037,37 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, c
         <div className="sm:col-span-2">
           <FormField label="Escalation Email (Top Management)">
             <input type="email" value={form.escalationEmail} onChange={e=>set('escalationEmail',e.target.value)} placeholder="ceo@company.com" className={inputCls} />
+          </FormField>
+        </div>
+
+        {/* ── Legal & Regulatory Section ── */}
+        <div className="sm:col-span-2">
+          <div className="flex items-center gap-2 my-1">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+            <span className="text-xs font-bold uppercase tracking-widest text-indigo-500 px-2">⚖️ Legal &amp; Regulatory</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+          </div>
+        </div>
+
+        <div className="sm:col-span-2">
+          <FormField label="Applicable Rule / Regulation">
+            <input
+              value={form.applicableRule}
+              onChange={e=>set('applicableRule',e.target.value)}
+              placeholder="e.g. Factories Act, 1948 – Section 6 & 7"
+              className={inputCls}
+            />
+          </FormField>
+        </div>
+        <div className="sm:col-span-2">
+          <FormField label="Legal Clause / Provision">
+            <textarea
+              value={form.legalClause}
+              onChange={e=>set('legalClause',e.target.value)}
+              rows={3}
+              placeholder="Describe the specific legal clause, section, or provision that mandates this compliance requirement…"
+              className={inputCls + ' resize-none'}
+            />
           </FormField>
         </div>
       </div>
@@ -1200,6 +1247,25 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                   </div>
                 ))}
               </div>
+
+              {/* ── Legal & Regulatory Section ── */}
+              {(viewReq.applicableRule || viewReq.legalClause) && (
+                <div className={`rounded-xl border p-4 space-y-3 ${dk?'bg-indigo-900/20 border-indigo-700/40':'bg-indigo-50 border-indigo-200'}`}>
+                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-500 flex items-center gap-1.5">⚖️ Legal &amp; Regulatory</p>
+                  {viewReq.applicableRule && (
+                    <div>
+                      <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${dk?'text-indigo-300':'text-indigo-600'}`}>Applicable Rule / Regulation</p>
+                      <p className={`text-sm font-medium ${dk?'text-white':'text-gray-800'}`}>{viewReq.applicableRule}</p>
+                    </div>
+                  )}
+                  {viewReq.legalClause && (
+                    <div>
+                      <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${dk?'text-indigo-300':'text-indigo-600'}`}>Legal Clause / Provision</p>
+                      <p className={`text-sm leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{viewReq.legalClause}</p>
+                    </div>
+                  )}
+                </div>
+              )}
               {viewReq.evidence?.length > 0 && (
                 <div>
                   <p className="font-semibold mb-2">📎 Evidence</p>
@@ -1324,7 +1390,10 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium max-w-[200px] truncate" title={req.title}>{req.title}</p>
-                      {req.evidence?.length>0 && <span className={`text-xs ${sub}`}>📎 {req.evidence.length} file(s)</span>}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {req.evidence?.length>0 && <span className={`text-xs ${sub}`}>📎 {req.evidence.length} file(s)</span>}
+                        {req.applicableRule && <span className="text-xs text-indigo-500 font-medium" title={req.applicableRule}>⚖️ Rule</span>}
+                      </div>
                     </td>
                     <td className={`px-4 py-3 whitespace-nowrap ${sub}`}>{plant?.name}</td>
                     <td className={`px-4 py-3 whitespace-nowrap ${sub}`}>{req.category}</td>
