@@ -845,9 +845,54 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
   };
 
   /* ── CRUD ── */
-  const addReq    = form => {
+  const addReq = form => {
     const newR = { ...form, id:`r${Date.now()}`, createdAt:new Date().toISOString(), evidence:[], comments:[] };
     updateRequirements([newR, ...requirements]);
+
+    /* ── Auto-mail on new requirement ── */
+    try {
+      const saved = localStorage.getItem('adminSettings');
+      if (saved) {
+        const cfg = JSON.parse(saved);
+        if (cfg.ejsEnabled && cfg.ejsPublicKey && cfg.ejsServiceId && cfg.ejsTemplateId && cfg.ejsToEmail) {
+          const plant    = plants.find(p => p.id === form.plantId);
+          const assignee = users.find(u => u.id === form.assignedTo);
+          emailjs.init(cfg.ejsPublicKey);
+          emailjs.send(
+            cfg.ejsServiceId,
+            cfg.ejsTemplateId,
+            {
+              to_email:  cfg.ejsToEmail,
+              to_name:   'Compliance Team',
+              from_name: 'LegalComp Pro',
+              subject:   `New Requirement Created: ${form.title}`,
+              message:   [
+                `A new compliance requirement has been created in LegalComp Pro.`,
+                ``,
+                `Title     : ${form.title}`,
+                `Plant     : ${plant ? plant.name + ' (' + plant.state + ')' : '—'}`,
+                `Category  : ${form.category}`,
+                `Priority  : ${form.priority}`,
+                `Status    : ${form.status}`,
+                `Due Date  : ${form.dueDate}`,
+                `Assigned  : ${assignee ? assignee.name + ' <' + assignee.email + '>' : 'Unassigned'}`,
+                `Reminder  : ${form.reminderFrequency}`,
+                form.escalationEmail ? `Escalation: ${form.escalationEmail}` : '',
+                ``,
+                `— LegalComp Pro Compliance System`,
+              ].filter(l => l !== undefined).join('\n'),
+              reply_to: cfg.fromEmail || cfg.ejsToEmail,
+            }
+          ).then(() => {
+            console.log('✅ Auto-mail sent for new requirement:', form.title);
+          }).catch(err => {
+            console.warn('⚠️ Auto-mail failed:', err?.text || err?.message || err);
+          });
+        }
+      }
+    } catch (mailErr) {
+      console.warn('⚠️ Auto-mail setup error:', mailErr);
+    }
   };
   const saveEdit  = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
   const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
