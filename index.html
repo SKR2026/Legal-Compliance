@@ -727,7 +727,6 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
     const raw = localStorage.getItem('adminSettings');
     if (!raw) return;
     const cfg = JSON.parse(raw);
-    if (!cfg.ejsEnabled)    return;
     if (!cfg.ejsPublicKey || !cfg.ejsServiceId || !cfg.ejsTemplateId) return;
     if (!cfg.ejsToEmail)    return;
 
@@ -1734,7 +1733,7 @@ function AdminSettings({ dk }) {
       ejsServiceId: '',
       ejsTemplateId: '',
       ejsToEmail: 'sushil@polyplasticsindia.com',
-      ejsEnabled: false,
+      ejsEnabled: true,
       // Firebase
       fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
       fbAuthDomain: 'skr-task.firebaseapp.com',
@@ -1895,16 +1894,16 @@ function AdminSettings({ dk }) {
           Browsers cannot connect to SMTP directly. EmailJS acts as a secure relay — it uses your Office 365 credentials on its server and delivers real email to your recipients.
         </p>
 
-        {/* Enable toggle */}
+        {/* Status indicator */}
         <div className={`flex items-center justify-between p-3 rounded-xl mb-5 ${dk?'bg-gray-700':'bg-gray-50'}`}>
           <div>
-            <p className="text-sm font-medium">Enable Email Notifications</p>
-            <p className={`text-xs ${sub}`}>Send escalation & reminder emails via Office 365</p>
+            <p className="text-sm font-medium">Email Notifications</p>
+            <p className={`text-xs ${sub}`}>Emails fire automatically when credentials are saved below</p>
           </div>
-          <button onClick={()=>set('ejsEnabled',!settings.ejsEnabled)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${settings.ejsEnabled?'bg-indigo-600':'bg-gray-300'}`}>
-            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.ejsEnabled?'left-6':'left-0.5'}`} />
-          </button>
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.ejsPublicKey && settings.ejsServiceId && settings.ejsTemplateId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            <span className={`w-2 h-2 rounded-full ${settings.ejsPublicKey && settings.ejsServiceId && settings.ejsTemplateId ? 'bg-green-500' : 'bg-amber-400'}`} />
+            {settings.ejsPublicKey && settings.ejsServiceId && settings.ejsTemplateId ? 'Active' : 'Keys missing'}
+          </span>
         </div>
 
         {/* Setup steps */}
@@ -1922,7 +1921,7 @@ function AdminSettings({ dk }) {
           <p>5. Paste all three keys below, set recipient email, then <em>Save All Settings</em> and <em>Send Test Email</em>.</p>
         </div>
 
-        <div className={`space-y-4 transition-opacity ${settings.ejsEnabled?'opacity-100':'opacity-50 pointer-events-none'}`}>
+        <div className="space-y-4">
           {/* SMTP reference fields */}
           <div className="grid grid-cols-2 gap-4">
             <FormField label="SMTP Host (reference)">
