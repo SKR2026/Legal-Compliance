@@ -706,6 +706,150 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
 }
 
 /* ═══════════════════════════════════════════
+   EMAILJS HELPER  – called from every trigger
+═══════════════════════════════════════════ */
+/**
+ * sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy })
+ *
+ * trigger: 'new_requirement' | 'status_change' | 'new_assignment' | 'reassignment'
+ *
+ * Reads EmailJS credentials from localStorage so it works from any component.
+ * Sends to:
+ *   1. cfg.ejsToEmail   (always – admin/compliance team)
+ *   2. assignee.email   (if different and trigger involves them)
+ */
+function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy }) {
+  try {
+    const raw = localStorage.getItem('adminSettings');
+    if (!raw) return;
+    const cfg = JSON.parse(raw);
+    if (!cfg.ejsEnabled)    return;
+    if (!cfg.ejsPublicKey || !cfg.ejsServiceId || !cfg.ejsTemplateId) return;
+    if (!cfg.ejsToEmail)    return;
+
+    emailjs.init(cfg.ejsPublicKey);
+
+    const plantLabel    = plant    ? `${plant.name} (${plant.state})`                 : '—';
+    const assigneeLabel = assignee ? `${assignee.name} <${assignee.email}>`            : 'Unassigned';
+    const byLabel       = changedBy? `${changedBy.name} <${changedBy.email}>`          : 'System';
+    const dateLabel     = req.dueDate ? new Date(req.dueDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+
+    // ── Build subject + body per trigger ──────────────────────────────────
+    let subject, body, toName;
+
+    if (trigger === 'new_requirement') {
+      subject = `[LegalComp] New Requirement: ${req.title}`;
+      toName  = 'Compliance Team';
+      body = [
+        `A new compliance requirement has been created.`,
+        ``,
+        `Title      : ${req.title}`,
+        `Plant      : ${plantLabel}`,
+        `Category   : ${req.category}`,
+        `Priority   : ${req.priority}`,
+        `Status     : ${req.status}`,
+        `Due Date   : ${dateLabel}`,
+        `Assigned To: ${assigneeLabel}`,
+        `Reminder   : ${req.reminderFrequency}`,
+        req.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
+        req.description     ? `\nDetails    : ${req.description}`   : null,
+        ``,
+        `Created by : ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].filter(l => l !== null).join('\n');
+
+    } else if (trigger === 'status_change') {
+      subject = `[LegalComp] Status Updated → ${req.status}: ${req.title}`;
+      toName  = assignee ? assignee.name : 'Compliance Team';
+      body = [
+        `The status of a compliance requirement has been updated.`,
+        ``,
+        `Title      : ${req.title}`,
+        `Plant      : ${plantLabel}`,
+        `Category   : ${req.category}`,
+        `Priority   : ${req.priority}`,
+        `Old Status : ${oldStatus}`,
+        `New Status : ${req.status}`,
+        `Due Date   : ${dateLabel}`,
+        `Assigned To: ${assigneeLabel}`,
+        ``,
+        `Changed by : ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].join('\n');
+
+    } else if (trigger === 'new_assignment') {
+      subject = `[LegalComp] New Task Assigned: ${req.title}`;
+      toName  = assignee ? assignee.name : 'Compliance Team';
+      body = [
+        `A compliance requirement has been assigned to you.`,
+        ``,
+        `Title      : ${req.title}`,
+        `Plant      : ${plantLabel}`,
+        `Category   : ${req.category}`,
+        `Priority   : ${req.priority}`,
+        `Status     : ${req.status}`,
+        `Due Date   : ${dateLabel}`,
+        `Reminder   : ${req.reminderFrequency}`,
+        req.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
+        ``,
+        `Assigned by: ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].filter(l => l !== null).join('\n');
+
+    } else if (trigger === 'reassignment') {
+      const oldLabel = oldAssignee ? `${oldAssignee.name} <${oldAssignee.email}>` : 'Unassigned';
+      subject = `[LegalComp] Reassigned: ${req.title}`;
+      toName  = 'Compliance Team';
+      body = [
+        `A compliance requirement has been reassigned.`,
+        ``,
+        `Title        : ${req.title}`,
+        `Plant        : ${plantLabel}`,
+        `Category     : ${req.category}`,
+        `Priority     : ${req.priority}`,
+        `Status       : ${req.status}`,
+        `Due Date     : ${dateLabel}`,
+        `Previous     : ${oldLabel}`,
+        `Now Assigned : ${assigneeLabel}`,
+        ``,
+        `Changed by   : ${byLabel}`,
+        ``,
+        `— LegalComp Pro Compliance System`,
+      ].join('\n');
+    } else {
+      return;
+    }
+
+    // ── Collect unique recipient addresses ─────────────────────────────
+    const recipients = new Set([cfg.ejsToEmail]);
+    if (assignee?.email)    recipients.add(assignee.email);
+    if (oldAssignee?.email && (trigger === 'reassignment')) recipients.add(oldAssignee.email);
+
+    // ── Fire one send per recipient ─────────────────────────────────────
+    recipients.forEach(toEmail => {
+      emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, {
+        to_email:  toEmail,
+        to_name:   toEmail === cfg.ejsToEmail ? toName : (assignee?.name || toName),
+        from_name: 'LegalComp Pro',
+        subject,
+        message:   body,
+        reply_to:  cfg.fromEmail || cfg.ejsToEmail,
+      }).then(() => {
+        console.log(`✅ [EmailJS] ${trigger} → ${toEmail}`);
+      }).catch(err => {
+        console.warn(`⚠️ [EmailJS] ${trigger} → ${toEmail} FAILED:`, err?.text || err?.message || err);
+      });
+    });
+
+  } catch (e) {
+    console.warn('⚠️ sendComplianceMail error:', e);
+  }
+}
+
+/* ═══════════════════════════════════════════
    REQUIREMENT MODAL (Add / Edit)
 ═══════════════════════════════════════════ */
 function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, categories: catsProp }) {
@@ -848,53 +992,40 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
   const addReq = form => {
     const newR = { ...form, id:`r${Date.now()}`, createdAt:new Date().toISOString(), evidence:[], comments:[] };
     updateRequirements([newR, ...requirements]);
-
-    /* ── Auto-mail on new requirement ── */
-    try {
-      const saved = localStorage.getItem('adminSettings');
-      if (saved) {
-        const cfg = JSON.parse(saved);
-        if (cfg.ejsEnabled && cfg.ejsPublicKey && cfg.ejsServiceId && cfg.ejsTemplateId && cfg.ejsToEmail) {
-          const plant    = plants.find(p => p.id === form.plantId);
-          const assignee = users.find(u => u.id === form.assignedTo);
-          emailjs.init(cfg.ejsPublicKey);
-          emailjs.send(
-            cfg.ejsServiceId,
-            cfg.ejsTemplateId,
-            {
-              to_email:  cfg.ejsToEmail,
-              to_name:   'Compliance Team',
-              from_name: 'LegalComp Pro',
-              subject:   `New Requirement Created: ${form.title}`,
-              message:   [
-                `A new compliance requirement has been created in LegalComp Pro.`,
-                ``,
-                `Title     : ${form.title}`,
-                `Plant     : ${plant ? plant.name + ' (' + plant.state + ')' : '—'}`,
-                `Category  : ${form.category}`,
-                `Priority  : ${form.priority}`,
-                `Status    : ${form.status}`,
-                `Due Date  : ${form.dueDate}`,
-                `Assigned  : ${assignee ? assignee.name + ' <' + assignee.email + '>' : 'Unassigned'}`,
-                `Reminder  : ${form.reminderFrequency}`,
-                form.escalationEmail ? `Escalation: ${form.escalationEmail}` : '',
-                ``,
-                `— LegalComp Pro Compliance System`,
-              ].filter(l => l !== undefined).join('\n'),
-              reply_to: cfg.fromEmail || cfg.ejsToEmail,
-            }
-          ).then(() => {
-            console.log('✅ Auto-mail sent for new requirement:', form.title);
-          }).catch(err => {
-            console.warn('⚠️ Auto-mail failed:', err?.text || err?.message || err);
-          });
-        }
-      }
-    } catch (mailErr) {
-      console.warn('⚠️ Auto-mail setup error:', mailErr);
+    // ── Email: new requirement ──
+    const plant    = plants.find(p => p.id === form.plantId);
+    const assignee = users.find(u => u.id === form.assignedTo);
+    sendComplianceMail({ trigger:'new_requirement', req:newR, plant, assignee, changedBy:null });
+    // ── Email: notify assignee separately ──
+    if (assignee) {
+      sendComplianceMail({ trigger:'new_assignment', req:newR, plant, assignee, changedBy:null });
     }
   };
-  const saveEdit  = form => updateRequirements(requirements.map(r=>r.id===editReq.id?{...r,...form}:r));
+
+  const saveEdit = form => {
+    const old = requirements.find(r => r.id === editReq.id);
+    const updated = { ...old, ...form };
+    updateRequirements(requirements.map(r => r.id === editReq.id ? updated : r));
+    if (!old) return;
+    const plant       = plants.find(p => p.id === updated.plantId);
+    const assignee    = users.find(u => u.id === updated.assignedTo);
+    const oldAssignee = users.find(u => u.id === old.assignedTo);
+    // ── Status changed ──
+    if (old.status !== updated.status) {
+      sendComplianceMail({ trigger:'status_change', req:updated, plant, assignee, oldStatus:old.status, changedBy:null });
+    }
+    // ── Assignment changed ──
+    if (old.assignedTo !== updated.assignedTo) {
+      if (updated.assignedTo) {
+        // New person assigned
+        sendComplianceMail({ trigger:'new_assignment', req:updated, plant, assignee, changedBy:null });
+      }
+      if (old.assignedTo && old.assignedTo !== updated.assignedTo) {
+        // Reassigned away from old person
+        sendComplianceMail({ trigger:'reassignment', req:updated, plant, assignee, oldAssignee, changedBy:null });
+      }
+    }
+  };
   const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
 
   /* ── Bulk delete ── */
@@ -1319,35 +1450,46 @@ function AdminPlants({ dk, plants, updatePlants }) {
    ADMIN – SETTINGS
 ═══════════════════════════════════════════ */
 function AdminSettings({ dk }) {
-  const [settings, setSettings] = useState({
-    escalation1: 'planthead@legalcomp.com',
-    escalation2: 'regional@legalcomp.com',
-    escalation3: 'ceo@legalcomp.com',
-    defaultReminder: 'Weekly',
-    overdueAlert: true,
-    autoEscalate: true,
-    escalateDays: 7,
-    smtpHost: 'smtp.office365.com',
-    smtpPort: '587',
-    fromEmail: '',
-    smtpUser: '',
-    smtpPass: '',
-    toast: false,
-    // EmailJS (browser SMTP relay)
-    ejsPublicKey: '',
-    ejsServiceId: '',
-    ejsTemplateId: '',
-    ejsToEmail: 'sushil@polyplasticsindia.com',
-    ejsEnabled: false,
-    // Firebase
-    fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
-    fbAuthDomain: 'skr-task.firebaseapp.com',
-    fbProjectId: 'skr-task',
-    fbStorageBucket: 'skr-task.firebasestorage.app',
-    fbMessagingSenderId: '1011690659933',
-    fbAppId: '1:1011690659933:web:f57e43ee0267a475682db4',
-    fbMeasurementId: 'G-67NGHMK0QR',
-    fbEnabled: true,
+  const [settings, setSettings] = useState(() => {
+    const defaults = {
+      escalation1: 'planthead@legalcomp.com',
+      escalation2: 'regional@legalcomp.com',
+      escalation3: 'ceo@legalcomp.com',
+      defaultReminder: 'Weekly',
+      overdueAlert: true,
+      autoEscalate: true,
+      escalateDays: 7,
+      smtpHost: 'smtp.office365.com',
+      smtpPort: '587',
+      fromEmail: '',
+      smtpUser: '',
+      smtpPass: '',
+      toast: false,
+      // EmailJS (browser SMTP relay)
+      ejsPublicKey: '',
+      ejsServiceId: '',
+      ejsTemplateId: '',
+      ejsToEmail: 'sushil@polyplasticsindia.com',
+      ejsEnabled: false,
+      // Firebase
+      fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
+      fbAuthDomain: 'skr-task.firebaseapp.com',
+      fbProjectId: 'skr-task',
+      fbStorageBucket: 'skr-task.firebasestorage.app',
+      fbMessagingSenderId: '1011690659933',
+      fbAppId: '1:1011690659933:web:f57e43ee0267a475682db4',
+      fbMeasurementId: 'G-67NGHMK0QR',
+      fbEnabled: true,
+    };
+    try {
+      const raw = localStorage.getItem('adminSettings');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.ejsPublicKey) emailjs.init(parsed.ejsPublicKey);
+        return { ...defaults, ...parsed, toast: false };
+      }
+    } catch(_) {}
+    return defaults;
   });
   const [fbTestStatus,    setFbTestStatus]    = useState(null);
   const [fbShowSecret,    setFbShowSecret]    = useState(false);
@@ -1356,18 +1498,6 @@ function AdminSettings({ dk }) {
   const [ejsShowPass,     setEjsShowPass]     = useState(false);
 
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
-
-  // Load persisted settings on mount + init EmailJS if key exists
-  useEffect(() => {
-    try {
-      const saved = storage.get('adminSettings');
-      if (saved) {
-        const parsed = JSON.parse(saved.value);
-        setSettings(s => ({ ...s, ...parsed, toast: false }));
-        if (parsed.ejsPublicKey) emailjs.init(parsed.ejsPublicKey);
-      }
-    } catch(_) {}
-  }, []);
 
   // Save all settings to localStorage and re-init EmailJS
   const save = () => {
@@ -2623,8 +2753,15 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
   const fileRef = useRef();
 
   const updateStatus = (id, status) => {
+    const req = requirements.find(r => r.id === id);
     updateRequirements(requirements.map(r=>r.id===id?{...r,status}:r));
     if (selReq?.id===id) setSelReq(sr=>({...sr,status}));
+    // ── Email: status change ──
+    if (req && req.status !== status) {
+      const plant    = plants.find(p => p.id === req.plantId);
+      const assignee = users.find(u => u.id === req.assignedTo);
+      sendComplianceMail({ trigger:'status_change', req:{...req,status}, plant, assignee, oldStatus:req.status, changedBy:currentUser });
+    }
   };
 
   const addComment = (reqId) => {
