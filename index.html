@@ -728,168 +728,214 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
     if (!raw) return;
     const cfg = JSON.parse(raw);
     if (!cfg.ejsPublicKey || !cfg.ejsServiceId || !cfg.ejsTemplateId) return;
-    if (!cfg.ejsToEmail)    return;
+    if (!cfg.ejsToEmail) return;
 
     emailjs.init(cfg.ejsPublicKey);
 
-    const plantLabel    = plant    ? `${plant.name} (${plant.state})`                 : '—';
-    const assigneeLabel = assignee ? `${assignee.name} <${assignee.email}>`            : 'Unassigned';
-    const byLabel       = changedBy? `${changedBy.name} <${changedBy.email}>`          : 'System';
-    const dateLabel     = req?.dueDate ? new Date(req.dueDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+    // ── Shared helpers ──────────────────────────────────────────────────
+    const fmtDate  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+    const calcDays = d => { const diff = Math.ceil((new Date(d) - Date.now()) / 86400000); return diff > 0 ? diff : 0; };
+    const sentDate = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const portalLink = window.location.href.split('?')[0];
+    const byLabel    = changedBy ? `${changedBy.name}` : 'System';
+    const TD = 'style="padding:4px 0;font-family:\'Courier New\',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;"';
 
-    // ── Build subject + body per trigger ──────────────────────────────────
-    let subject, body, toName;
+    // ── HTML row builders (return '' to hide a row) ─────────────────────
+    const rowAssignee = (name, email, dept) =>
+      `<tr><td ${TD}>&nbsp;&nbsp;👤 Assigned To: <strong style="color:#a5b4fc;">${name}</strong> (${email})</td></tr>` +
+      `<tr><td ${TD}>&nbsp;&nbsp;🏢 Department:&nbsp;<strong style="color:#a5b4fc;">${dept || '—'}</strong></td></tr>`;
+
+    const rowCategory = (cat) =>
+      `<tr><td ${TD}>&nbsp;&nbsp;🏷️ Category:&nbsp;&nbsp;&nbsp;<strong style="color:#a5b4fc;">${cat}</strong></td></tr>`;
+
+    const rowDaysLeft = (days) =>
+      `<tr><td ${TD}>&nbsp;&nbsp;⌛ Remaining:&nbsp;&nbsp;<strong style="color:#a5b4fc;">${days} days</strong></td></tr>`;
+
+    const rowStatus = (status) =>
+      `<tr><td ${TD}>&nbsp;&nbsp;⏳ Status:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong style="color:#a5b4fc;">${status}</strong></td></tr>`;
+
+    const rowReminder = (freq) =>
+      `<tr><td ${TD}>&nbsp;&nbsp;🔔 Reminder:&nbsp;&nbsp;&nbsp;<strong style="color:#a5b4fc;">${freq}</strong></td></tr>`;
+
+    const rowEscLvl = (lvl) =>
+      `<tr><td ${TD}>&nbsp;&nbsp;⬆️ Escalation:&nbsp;<strong style="color:#c4b5fd;">${lvl}</strong></td></tr>`;
+
+    const blockDesc = (desc) =>
+      `<tr><td style="padding:6px 0 12px;font-family:'Courier New',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;">` +
+      `📝 Description:<br/><span style="color:#cbd5e1;">${desc}</span></td></tr>` +
+      `<tr><td style="padding:4px 0;"><hr style="border:none;border-top:1px solid #334155;"/></td></tr>`;
+
+    const blockActionSteps = (title, html) =>
+      `<tr><td style="padding:10px 0 4px;font-family:'Courier New',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;">` +
+      `⚡ <strong>${title}</strong></td></tr>` +
+      `<tr><td style="padding:4px 0 12px;font-family:'Courier New',monospace;font-size:14px;color:#cbd5e1;line-height:1.9;">${html}</td></tr>`;
+
+    const rowEscNotice = (line) =>
+      `<tr><td style="padding:6px 0 14px;font-family:'Courier New',monospace;font-size:13px;color:#fca5a5;line-height:1.7;">${line}</td></tr>`;
+
+    // ── Base payload (always sent) ──────────────────────────────────────
+    const base = {
+      from_name:          'LegalComp Pro',
+      signoff_line:       'Compliance Management System',
+      sent_date:          sentDate,
+      portal_link:        portalLink,
+      portal_link_label:  'Open Compliance Portal →',
+      task_title:         req?.title    || '—',
+      task_category:      req?.category || '—',
+      task_priority:      req?.priority || '—',
+      task_status:        req?.status   || '—',
+      task_desc:          req?.description || '—',
+      due_date:           fmtDate(req?.dueDate),
+      due_date_label:     'Due Date:',
+      plant_name:         plant?.name  || '—',
+      plant_state:        plant?.state || '—',
+      to_name:            assignee?.name  || 'Compliance Team',
+      to_email:           assignee?.email || cfg.ejsToEmail,
+      assignee_dept:      assignee?.dept  || '—',
+      escalation_lvl:     req?.escalationLevel ? `Level ${req.escalationLevel}` : '—',
+      // conditional rows — default all empty (hidden)
+      row_assignee:       '',
+      row_category:       '',
+      row_days_left:      '',
+      row_status:         '',
+      row_reminder:       '',
+      row_escalation_lvl: '',
+      block_desc:         '',
+      block_action_steps: '',
+      row_esc_notice:     '',
+      // text fields
+      greeting:           'Dear Compliance Team,',
+      opening_line:       '',
+      section_title:      'REQUIREMENT DETAILS',
+      trigger_label:      'Notification',
+      closing_remark:     'Please log in to the compliance portal to review and take action.',
+    };
+
+    // ── Per-trigger config ──────────────────────────────────────────────
+    let subject = '';
+    let extrasByRecipient = {};
 
     if (trigger === 'new_requirement') {
-      subject = `[LegalComp] New Requirement: ${req?.title}`;
-      toName  = 'Compliance Team';
-      body = [
-        `A new compliance requirement has been created.`,
-        ``,
-        `Title      : ${req?.title}`,
-        `Plant      : ${plantLabel}`,
-        `Category   : ${req?.category}`,
-        `Priority   : ${req?.priority}`,
-        `Status     : ${req?.status}`,
-        `Due Date   : ${dateLabel}`,
-        `Assigned To: ${assigneeLabel}`,
-        req?.reminderFrequency ? `Reminder   : ${req.reminderFrequency}` : null,
-        req?.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
-        req?.description     ? `\nDetails    : ${req.description}`   : null,
-        ``,
-        `Created by : ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].filter(l => l !== null).join('\n');
+      subject = `[LegalComp] New Requirement Added: ${req?.title}`;
+      const days = req?.dueDate ? calcDays(req.dueDate) : null;
+      Object.assign(base, {
+        trigger_label:  'New Requirement',
+        greeting:       'Dear Compliance Team,',
+        opening_line:   'A new compliance requirement has been created in the system and is ready for action.',
+        section_title:  'REQUIREMENT DETAILS',
+        row_category:   rowCategory(req?.category),
+        row_days_left:  days !== null ? rowDaysLeft(days) : '',
+        row_reminder:   req?.reminderFrequency ? rowReminder(req.reminderFrequency) : '',
+        row_assignee:   assignee ? rowAssignee(assignee.name, assignee.email, assignee.dept) : '',
+        block_desc:     req?.description ? blockDesc(req.description) : '',
+        closing_remark: 'Please ensure the requirement is reviewed and assigned promptly.',
+      });
+
+    } else if (trigger === 'new_assignment') {
+      subject = `[LegalComp] New Compliance Task Assigned to You: ${req?.title}`;
+      const days = req?.dueDate ? calcDays(req.dueDate) : 0;
+      // ── Admin recipient sees assignee block; assignee does not ──
+      extrasByRecipient[cfg.ejsToEmail] = {
+        greeting:     'Dear Compliance Team,',
+        row_assignee: assignee ? rowAssignee(assignee.name, assignee.email, assignee.dept) : '',
+      };
+      if (assignee?.email && assignee.email !== cfg.ejsToEmail) {
+        extrasByRecipient[assignee.email] = {
+          greeting:     `Dear ${assignee.name},`,
+          row_assignee: '',
+        };
+      }
+      Object.assign(base, {
+        trigger_label:  'New Assignment',
+        opening_line:   'A compliance requirement has been assigned. Please review the details below and take the necessary action before the due date.',
+        section_title:  'ASSIGNED REQUIREMENT DETAILS',
+        row_category:   rowCategory(req?.category),
+        row_days_left:  rowDaysLeft(days),
+        row_reminder:   req?.reminderFrequency ? rowReminder(req.reminderFrequency) : '',
+        block_desc:     req?.description ? blockDesc(req.description) : '',
+        closing_remark: 'Please log in to the compliance portal to review the requirement, upload evidence and update the status once completed.',
+      });
 
     } else if (trigger === 'status_change') {
       subject = `[LegalComp] Status Updated → ${req?.status}: ${req?.title}`;
-      toName  = assignee ? assignee.name : 'Compliance Team';
-      body = [
-        `The status of a compliance requirement has been updated.`,
-        ``,
-        `Title      : ${req?.title}`,
-        `Plant      : ${plantLabel}`,
-        `Category   : ${req?.category}`,
-        `Priority   : ${req?.priority}`,
-        `Old Status : ${oldStatus}`,
-        `New Status : ${req?.status}`,
-        `Due Date   : ${dateLabel}`,
-        `Assigned To: ${assigneeLabel}`,
-        ``,
-        `Changed by : ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].join('\n');
-
-    } else if (trigger === 'new_assignment') {
-      subject = `[LegalComp] New Task Assigned: ${req?.title}`;
-      toName  = assignee ? assignee.name : 'Compliance Team';
-      body = [
-        `A compliance requirement has been assigned to you.`,
-        ``,
-        `Title      : ${req?.title}`,
-        `Plant      : ${plantLabel}`,
-        `Category   : ${req?.category}`,
-        `Priority   : ${req?.priority}`,
-        `Status     : ${req?.status}`,
-        `Due Date   : ${dateLabel}`,
-        `Reminder   : ${req?.reminderFrequency}`,
-        req?.escalationEmail ? `Escalation : ${req.escalationEmail}` : null,
-        ``,
-        `Assigned by: ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].filter(l => l !== null).join('\n');
+      const days = req?.dueDate ? calcDays(req.dueDate) : null;
+      Object.assign(base, {
+        trigger_label:  'Status Updated',
+        greeting:       assignee ? `Dear ${assignee.name},` : 'Dear Compliance Team,',
+        opening_line:   `The status of a compliance requirement has been updated from "${oldStatus}" to "${req?.status}".`,
+        section_title:  'UPDATED REQUIREMENT DETAILS',
+        row_category:   rowCategory(req?.category),
+        row_status:     rowStatus(req?.status),
+        row_days_left:  (req?.status !== 'Completed' && days !== null) ? rowDaysLeft(days) : '',
+        closing_remark: 'Please review the updated status and ensure all compliance actions are on track.',
+      });
 
     } else if (trigger === 'reassignment') {
-      const oldLabel = oldAssignee ? `${oldAssignee.name} <${oldAssignee.email}>` : 'Unassigned';
-      subject = `[LegalComp] Reassigned: ${req?.title}`;
-      toName  = 'Compliance Team';
-      body = [
-        `A compliance requirement has been reassigned.`,
-        ``,
-        `Title        : ${req?.title}`,
-        `Plant        : ${plantLabel}`,
-        `Category     : ${req?.category}`,
-        `Priority     : ${req?.priority}`,
-        `Status       : ${req?.status}`,
-        `Due Date     : ${dateLabel}`,
-        `Previous     : ${oldLabel}`,
-        `Now Assigned : ${assigneeLabel}`,
-        ``,
-        `Changed by   : ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].join('\n');
-    } else if (trigger === 'plant_added') {
-      subject = `[LegalComp] New Plant Added: ${plant?.name}`;
-      toName  = 'Compliance Team';
-      body = [
-        `A new plant location has been added to the LegalComp system.`,
-        ``,
-        `Plant Name : ${plant?.name || '—'}`,
-        `State      : ${plant?.state || '—'}`,
-        `Plant ID   : ${plant?.id || '—'}`,
-        ``,
-        `Added by   : ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].join('\n');
+      const oldLabel = oldAssignee ? `${oldAssignee.name} (${oldAssignee.email})` : 'Unassigned';
+      subject = `[LegalComp] Requirement Reassigned: ${req?.title}`;
+      const days = req?.dueDate ? calcDays(req.dueDate) : 0;
+      extrasByRecipient[cfg.ejsToEmail] = {
+        greeting:     'Dear Compliance Team,',
+        opening_line: `A compliance requirement has been reassigned from ${oldLabel} to ${assignee?.name || 'a new team member'}.`,
+        row_assignee: assignee ? rowAssignee(assignee.name, assignee.email, assignee.dept) : '',
+      };
+      if (assignee?.email && assignee.email !== cfg.ejsToEmail) {
+        extrasByRecipient[assignee.email] = {
+          greeting:     `Dear ${assignee.name},`,
+          opening_line: 'A compliance requirement has been reassigned to you. Please review the details and take ownership immediately.',
+          row_assignee: '',
+        };
+      }
+      Object.assign(base, {
+        trigger_label:  'Reassigned',
+        section_title:  'REASSIGNMENT DETAILS',
+        row_category:   rowCategory(req?.category),
+        row_days_left:  rowDaysLeft(days),
+        row_reminder:   req?.reminderFrequency ? rowReminder(req.reminderFrequency) : '',
+        closing_remark: 'Please log in to the compliance portal to review and begin work on this requirement.',
+      });
 
-    } else if (trigger === 'plant_deleted') {
-      subject = `[LegalComp] Plant Removed: ${plant?.name}`;
-      toName  = 'Compliance Team';
-      body = [
-        `A plant location has been removed from the LegalComp system.`,
-        ``,
-        `Plant Name : ${plant?.name || '—'}`,
-        `State      : ${plant?.state || '—'}`,
-        `Plant ID   : ${plant?.id || '—'}`,
-        ``,
-        `Removed by : ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].join('\n');
-
-    } else if (trigger === 'plant_updated') {
-      subject = `[LegalComp] Plant Updated: ${plant?.name}`;
-      toName  = 'Compliance Team';
-      body = [
-        `A plant location has been updated in the LegalComp system.`,
-        ``,
-        `Plant Name : ${plant?.name || '—'}`,
-        `State      : ${plant?.state || '—'}`,
-        `Plant ID   : ${plant?.id || '—'}`,
-        ``,
-        `Updated by : ${byLabel}`,
-        ``,
-        `— LegalComp Pro Compliance System`,
-      ].join('\n');
-
+    } else if (['plant_added','plant_deleted','plant_updated'].includes(trigger)) {
+      const labels = { plant_added:'Plant Added', plant_deleted:'Plant Removed', plant_updated:'Plant Updated' };
+      const openings = {
+        plant_added:   `A new plant location has been added to the LegalComp system by ${byLabel}.`,
+        plant_deleted: `A plant location has been removed from the LegalComp system by ${byLabel}.`,
+        plant_updated: `A plant location has been updated in the LegalComp system by ${byLabel}.`,
+      };
+      const closings = {
+        plant_added:   'Please ensure compliance requirements are set up for this new plant.',
+        plant_deleted: 'Please archive all related compliance records for this plant.',
+        plant_updated: 'Please verify the updated plant details in the compliance portal.',
+      };
+      subject = `[LegalComp] ${labels[trigger]}: ${plant?.name}`;
+      Object.assign(base, {
+        trigger_label:  labels[trigger],
+        greeting:       'Dear Compliance Team,',
+        opening_line:   openings[trigger],
+        section_title:  'PLANT DETAILS',
+        task_title:     plant?.name  || '—',
+        plant_name:     plant?.name  || '—',
+        plant_state:    plant?.state || '—',
+        task_priority:  '—',
+        due_date:       '—',
+        closing_remark: closings[trigger],
+      });
     } else {
       return;
     }
 
-    // ── Collect unique recipient addresses ─────────────────────────────
+    // ── Collect recipients ──────────────────────────────────────────────
     const recipients = new Set([cfg.ejsToEmail]);
-    if (assignee?.email)    recipients.add(assignee.email);
-    if (oldAssignee?.email && (trigger === 'reassignment')) recipients.add(oldAssignee.email);
+    if (assignee?.email) recipients.add(assignee.email);
+    if (oldAssignee?.email && trigger === 'reassignment') recipients.add(oldAssignee.email);
 
-    // ── Fire one send per recipient ─────────────────────────────────────
+    // ── Fire one send per recipient, merging per-recipient overrides ────
     recipients.forEach(toEmail => {
-      emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, {
-        to_email:  toEmail,
-        to_name:   toEmail === cfg.ejsToEmail ? toName : (assignee?.name || toName),
-        from_name: 'LegalComp Pro',
-        subject,
-        message:   body,
-        reply_to:  cfg.fromEmail || cfg.ejsToEmail,
-      }).then(() => {
-        console.log(`✅ [EmailJS] ${trigger} → ${toEmail}`);
-      }).catch(err => {
-        console.warn(`⚠️ [EmailJS] ${trigger} → ${toEmail} FAILED:`, err?.text || err?.message || err);
-      });
+      const overrides = extrasByRecipient[toEmail] || {};
+      const payload = Object.assign({}, base, { subject, to_email: toEmail, reply_to: cfg.fromEmail || cfg.ejsToEmail }, overrides);
+      emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, payload)
+        .then(() => console.log(`✅ [EmailJS] ${trigger} → ${toEmail}`))
+        .catch(err => console.warn(`⚠️ [EmailJS] ${trigger} → ${toEmail} FAILED:`, err?.text || err?.message || err));
     });
 
   } catch (e) {
