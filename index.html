@@ -874,8 +874,7 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
 
     // ── Collect unique recipient addresses ─────────────────────────────
     const recipients = new Set([cfg.ejsToEmail]);
-if (assignee?.email && ['new_assignment', 'reassignment', 'status_change'].includes(trigger)) {
-  recipients.add(assignee.email);
+    if (assignee?.email)    recipients.add(assignee.email);
     if (oldAssignee?.email && (trigger === 'reassignment')) recipients.add(oldAssignee.email);
 
     // ── Fire one send per recipient ─────────────────────────────────────
