@@ -2237,7 +2237,7 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
   const sub  = dk?'text-gray-400':'text-gray-500';
 
   /* ── CSV template columns ── */
-  const COLS = ['title','description','category','priority','status','plant_id','state','due_date','reminder_frequency','escalation_level','escalation_email','assigned_email'];
+  const COLS = ['title','description','category','priority','status','plant_id','state','due_date','reminder_frequency','escalation_level','escalation_email','assigned_email','applicable_rule','legal_clause'];
 
   /* ── Download template ── */
   const downloadTemplate = () => {
@@ -2257,6 +2257,8 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
           (i%3)+1,
           'ceo@legalcomp.com',
           '',
+          `"${['Factories Act 1948 – Section 6','Environment Protection Act 1986 – Rule 5','Fire Services Act – Rule 12'][i]}"`,
+          `"${['License to be obtained before operations; renewal within 30 days of expiry.','NOC mandatory from State Pollution Control Board.','Fire NOC required as per National Building Code.'][i]}"`,
         ].join(',')
       )
     ].join('\n');
@@ -2330,6 +2332,8 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
         escalationLevel:  escLvl,
         escalationEmail:  obj.escalation_email || '',
         assignedTo,
+        applicableRule:   obj.applicable_rule || '',
+        legalClause:      obj.legal_clause || '',
       });
     });
     return { rows, errs };
@@ -2402,6 +2406,8 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
       reminderFrequency:r.reminderFrequency,
       escalationLevel:  r.escalationLevel,
       escalationEmail:  r.escalationEmail,
+      applicableRule:   r.applicableRule || '',
+      legalClause:      r.legalClause || '',
       createdAt:        new Date().toISOString(),
       evidence:         [],
       comments:         [],
@@ -2510,6 +2516,8 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
                     ['escalation_level','1/2/3','No','1=Plant Head, 2=Regional, 3=Top Mgmt'],
                     ['escalation_email','Email','No','Override escalation email'],
                     ['assigned_email','Email','No','Must match an existing user email'],
+                    ['applicable_rule','Text','No','e.g. Factories Act 1948 – Section 6'],
+                    ['legal_clause','Text','No','Specific clause or provision mandating compliance'],
                   ].map(([col,type,req,notes])=>(
                     <tr key={col} className={dk?'hover:bg-gray-700/50':'hover:bg-gray-50'}>
                       <td className="px-3 py-2 font-mono text-indigo-500 font-semibold">{col}</td>
@@ -2613,14 +2621,14 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
                         checked={visibleRows.filter(r=>r._valid).length>0 && visibleRows.filter(r=>r._valid).every(r=>selRows.has(r._rowNum))}
                         onChange={toggleAll} className="rounded" />
                     </th>
-                    {['Row','Title','Plant','State','Category','Priority','Status','Due Date','Assigned To','Valid'].map(h=>(
+                    {['Row','Title','Plant','State','Category','Priority','Status','Due Date','Assigned To','⚖️ Rule','Valid'].map(h=>(
                       <th key={h} className="px-3 py-3 text-left whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${dk?'divide-gray-700':'divide-gray-100'}`}>
                   {visibleRows.length === 0 && (
-                    <tr><td colSpan={11} className="text-center py-10 text-gray-400">No rows match filters</td></tr>
+                    <tr><td colSpan={12} className="text-center py-10 text-gray-400">No rows match filters</td></tr>
                   )}
                   {visibleRows.map(row => {
                     const isSelected = selRows.has(row._rowNum);
@@ -2646,6 +2654,11 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
                         <td className="px-3 py-2"><Badge label={row.status}   color={STATUS_CLR[row.status]  ||'#6366f1'} /></td>
                         <td className={`px-3 py-2 ${sub} whitespace-nowrap`}>{row.dueDate||'—'}</td>
                         <td className={`px-3 py-2 ${sub}`}>{assignee?.name||<span className="text-amber-500">Unassigned</span>}</td>
+                        <td className="px-3 py-2 max-w-[160px]">
+                          {row.applicableRule
+                            ? <span className="text-indigo-500 text-xs truncate block" title={row.applicableRule}>⚖️ {row.applicableRule}</span>
+                            : <span className={`text-xs ${sub}`}>—</span>}
+                        </td>
                         <td className="px-3 py-2 text-center">
                           {row._valid
                             ? <span className="text-green-500 font-bold text-sm">✓</span>
