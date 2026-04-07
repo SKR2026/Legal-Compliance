@@ -29,6 +29,13 @@
              s.src='https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js';
              document.head.appendChild(s);"></script>
 
+  <!-- EmailJS SDK – browser email sending without a backend -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"
+    onerror="console.error('❌ EmailJS failed to load from jsDelivr. Trying unpkg fallback…');
+             var s=document.createElement('script');
+             s.src='https://unpkg.com/@emailjs/browser@4/dist/email.min.js';
+             document.head.appendChild(s);"></script>
+
   <!-- Firebase SDK (compat build) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -870,22 +877,92 @@ function buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, tri
 </html>`;
 }
 
+/* ═══════════════════════════════════════════
+   EMAILJS HELPER
+   – Alternative email provider using EmailJS
+     No backend required; uses EmailJS SDK
+═══════════════════════════════════════════ */
+
+/**
+ * sendEmailJsMail(cfg, { toEmail, subject, htmlBody, templateParams })
+ * Sends an email via EmailJS using a template or raw params.
+ * cfg: { ejsServiceId, ejsTemplateId, ejsPublicKey, msToEmail }
+ */
+async function sendEmailJsMail(cfg, { toEmail, subject, plainText, templateParams }) {
+  if (typeof emailjs === 'undefined') {
+    throw new Error('EmailJS library failed to load. Check your internet connection or ad-blockers.');
+  }
+  if (!cfg.ejsServiceId || !cfg.ejsTemplateId || !cfg.ejsPublicKey) {
+    throw new Error('EmailJS Service ID, Template ID, and Public Key are all required.');
+  }
+
+  // Initialize EmailJS (idempotent)
+  emailjs.init({ publicKey: cfg.ejsPublicKey });
+
+  // Merge caller params with standard params
+  const params = {
+    to_email:    toEmail,
+    to_name:     templateParams?.to_name     || 'Compliance Team',
+    from_name:   templateParams?.from_name   || 'LegalComp Pro',
+    subject:     subject,
+    message:     plainText || templateParams?.message || subject,
+    reply_to:    cfg.fromEmail || cfg.msToEmail || '',
+    // extra fields callers may supply
+    ...(templateParams || {}),
+  };
+
+  const response = await emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, params);
+  if (response.status !== 200) {
+    throw new Error(`EmailJS responded with status ${response.status}: ${response.text}`);
+  }
+  return response;
+}
+
+/**
+ * buildEmailJsPlainText({ greeting, openingLine, rows, closingRemark, portalLink, sentDate })
+ * Returns a plain-text fallback string for EmailJS templates.
+ */
+function buildEmailJsPlainText({ greeting, openingLine, rows, closingRemark, portalLink, sentDate }) {
+  const rowLines = rows
+    .filter(([, , value]) => value)
+    .map(([icon, label, value]) => `  ${icon} ${label}: ${value}`)
+    .join('\n');
+  return `${greeting}
+
+${openingLine}
+
+${rowLines}
+
+${closingRemark}
+
+Open Compliance Portal: ${portalLink}
+
+Sent on ${sentDate} · LegalComp Pro`;
+}
+
 /**
  * sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy })
  *
  * trigger: 'new_requirement' | 'status_change' | 'new_assignment' | 'reassignment'
  *          | 'plant_added' | 'plant_deleted' | 'plant_updated'
  *
- * Reads Microsoft Graph credentials from localStorage.
- * Sends via Microsoft Graph API (delegated Mail.Send permission).
+ * Reads email provider settings from localStorage.
+ * emailProvider: 'graph' (Microsoft Graph API) | 'emailjs' | 'both'
  */
 async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy }) {
   try {
     const raw = localStorage.getItem('adminSettings');
     if (!raw) return;
     const cfg = JSON.parse(raw);
-    if (!cfg.msClientId || !cfg.msTenantId) return;
-    if (!cfg.msToEmail) return;
+
+    const provider = cfg.emailProvider || 'graph'; // 'graph' | 'emailjs' | 'both'
+    const useGraph  = (provider === 'graph'  || provider === 'both');
+    const useEjs    = (provider === 'emailjs'|| provider === 'both');
+
+    // Quick-exit if neither provider is configured
+    const graphReady = useGraph  && cfg.msClientId && cfg.msTenantId && cfg.msToEmail;
+    const ejsReady   = useEjs    && cfg.ejsServiceId && cfg.ejsTemplateId && cfg.ejsPublicKey && cfg.msToEmail;
+    if (!graphReady && !ejsReady) return;
 
     // ── Shared helpers ──────────────────────────────────────────────────
     const fmtDate  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -996,8 +1073,16 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
       return;
     }
 
-    // ── Acquire Graph token once ────────────────────────────────────────
-    const accessToken = await getMSGraphToken(cfg);
+    // ── Acquire Graph token once (if needed) ────────────────────────────
+    let accessToken = null;
+    if (graphReady) {
+      try {
+        accessToken = await getMSGraphToken(cfg);
+      } catch(e) {
+        console.warn('⚠️ MS Graph token acquisition failed:', e?.message || e);
+        if (!ejsReady) return; // nothing else to fall back to
+      }
+    }
 
     // ── Collect recipients ──────────────────────────────────────────────
     const recipients = new Set([cfg.msToEmail]);
@@ -1008,23 +1093,79 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
     for (const toEmail of recipients) {
       const overrides  = extrasByRecipient[toEmail] || {};
       const finalRows  = [...baseRows, ...(overrides.extraRows || [])];
-      const htmlBody   = buildComplianceHtml({
-        subject,
-        greeting:      overrides.greeting    || greeting,
-        openingLine:   overrides.openingLine || openingLine,
-        sectionTitle,
-        triggerLabel,
-        rows:          finalRows,
-        closingRemark,
-        portalLink,
-        sentDate,
-      });
-      await sendGraphMail(accessToken, { toEmail, subject, htmlBody });
-      console.log(`✅ [MS Graph] ${trigger} → ${toEmail}`);
+      const finalGreeting    = overrides.greeting    || greeting;
+      const finalOpeningLine = overrides.openingLine || openingLine;
+
+      // ── Microsoft Graph send ──────────────────────────────────────────
+      if (graphReady && accessToken) {
+        try {
+          const htmlBody = buildComplianceHtml({
+            subject,
+            greeting:    finalGreeting,
+            openingLine: finalOpeningLine,
+            sectionTitle,
+            triggerLabel,
+            rows:        finalRows,
+            closingRemark,
+            portalLink,
+            sentDate,
+          });
+          await sendGraphMail(accessToken, { toEmail, subject, htmlBody });
+          console.log(`✅ [MS Graph] ${trigger} → ${toEmail}`);
+        } catch(e) {
+          console.warn(`⚠️ MS Graph send failed for ${toEmail}:`, e?.message || e);
+        }
+      }
+
+      // ── EmailJS send ──────────────────────────────────────────────────
+      if (ejsReady) {
+        try {
+          const plainText = buildEmailJsPlainText({
+            greeting:    finalGreeting,
+            openingLine: finalOpeningLine,
+            rows:        finalRows,
+            closingRemark,
+            portalLink,
+            sentDate,
+          });
+          // Build a rich templateParams map for flexible EmailJS templates
+          const reqObj = req || {};
+          const plantObj = plant || {};
+          await sendEmailJsMail(cfg, {
+            toEmail,
+            subject,
+            plainText,
+            templateParams: {
+              to_name:         overrides.greeting ? overrides.greeting.replace(/^Dear\s+/i,'').replace(/,$/,'') : 'Compliance Team',
+              from_name:       'LegalComp Pro',
+              trigger_label:   triggerLabel,
+              opening_line:    finalOpeningLine,
+              closing_remark:  closingRemark,
+              portal_link:     portalLink,
+              sent_date:       sentDate,
+              req_title:       reqObj.title        || '',
+              req_category:    reqObj.category      || '',
+              req_priority:    reqObj.priority      || '',
+              req_status:      reqObj.status        || '',
+              req_due_date:    reqObj.dueDate        ? new Date(reqObj.dueDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '',
+              req_description: reqObj.description   || '',
+              plant_name:      plantObj.name         || '',
+              plant_state:     plantObj.state        || '',
+              assignee_name:   assignee?.name        || '',
+              assignee_email:  assignee?.email       || '',
+              changed_by:      changedBy?.name       || 'System',
+              old_status:      oldStatus             || '',
+            },
+          });
+          console.log(`✅ [EmailJS] ${trigger} → ${toEmail}`);
+        } catch(e) {
+          console.warn(`⚠️ EmailJS send failed for ${toEmail}:`, e?.message || e);
+        }
+      }
     }
 
   } catch (e) {
-    console.warn('⚠️ sendComplianceMail (MS Graph) error:', e?.message || e);
+    console.warn('⚠️ sendComplianceMail error:', e?.message || e);
   }
 }
 
@@ -1917,6 +2058,13 @@ function AdminSettings({ dk }) {
       msTenantId: '',
       msToEmail: 'sushil@polyplasticsindia.com',
       msEnabled: true,
+      // EmailJS
+      ejsServiceId: '',
+      ejsTemplateId: '',
+      ejsPublicKey: '',
+      ejsEnabled: false,
+      // Email provider selection
+      emailProvider: 'graph', // 'graph' | 'emailjs' | 'both'
       // Firebase
       fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
       fbAuthDomain: 'skr-task.firebaseapp.com',
@@ -1941,6 +2089,8 @@ function AdminSettings({ dk }) {
   const [emailTestStatus, setEmailTestStatus] = useState(null); // null | 'sending' | 'success' | 'error'
   const [emailTestMsg,    setEmailTestMsg]    = useState('');
   const [ejsShowPass,     setEjsShowPass]     = useState(false);
+  const [ejsTestStatus,   setEjsTestStatus]   = useState(null); // null | 'sending' | 'success' | 'error'
+  const [ejsTestMsg,      setEjsTestMsg]      = useState('');
 
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
 
@@ -1986,6 +2136,46 @@ function AdminSettings({ dk }) {
       setEmailTestMsg(`Failed: ${err?.message || String(err)}`);
     }
     setTimeout(()=>setEmailTestStatus(null), 6000);
+  };
+
+  /* ── Send a real test email via EmailJS ── */
+  const sendTestEmailJs = async () => {
+    if (!settings.ejsServiceId || !settings.ejsTemplateId || !settings.ejsPublicKey) {
+      setEjsTestMsg('Enter your Service ID, Template ID, and Public Key first.');
+      setEjsTestStatus('error');
+      setTimeout(()=>setEjsTestStatus(null), 4000);
+      return;
+    }
+    if (!settings.msToEmail) {
+      setEjsTestMsg('Enter a recipient email address in the "Recipient Email (To)" field above.');
+      setEjsTestStatus('error');
+      setTimeout(()=>setEjsTestStatus(null), 4000);
+      return;
+    }
+    setEjsTestStatus('sending');
+    setEjsTestMsg('');
+    try {
+      await sendEmailJsMail(settings, {
+        toEmail: settings.msToEmail,
+        subject: 'LegalComp Pro – EmailJS Test',
+        plainText: `Hello,\n\nThis is a test email from LegalComp Pro via EmailJS sent on ${new Date().toLocaleString('en-IN')}.\n\nYour EmailJS integration is working correctly.\n\n— LegalComp Pro Compliance System`,
+        templateParams: {
+          to_name:      'Compliance Team',
+          from_name:    'LegalComp Pro',
+          trigger_label:'Test',
+          opening_line: 'This is a test email from LegalComp Pro via EmailJS.',
+          closing_remark:'Your EmailJS integration is working correctly.',
+          portal_link:  window.location.href.split('?')[0],
+          sent_date:    new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}),
+        },
+      });
+      setEjsTestStatus('success');
+      setEjsTestMsg(`Email delivered to ${settings.msToEmail}`);
+    } catch (err) {
+      setEjsTestStatus('error');
+      setEjsTestMsg(`Failed: ${err?.message || String(err)}`);
+    }
+    setTimeout(()=>setEjsTestStatus(null), 6000);
   };
 
   const testFirebase = async () => {
@@ -2062,82 +2252,170 @@ function AdminSettings({ dk }) {
 
       <div className={card}>
         <h3 className="font-semibold mb-1 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
-          <span>📮</span> Email Delivery (Microsoft Graph API)
+          <span>📮</span> Email Delivery Settings
         </h3>
-        <p className={`text-xs mb-4 ${sub}`}>
-          Send compliance notifications directly via your Microsoft 365 account using the Microsoft Graph API. No third-party relay needed — emails are sent from your own Office 365 mailbox.
+        <p className={`text-xs mb-5 ${sub}`}>
+          Choose how compliance notifications are sent. Use Microsoft Graph (Office 365), EmailJS (no backend required), or both simultaneously as a redundant dual-send.
         </p>
 
-        {/* Status indicator */}
-        <div className={`flex items-center justify-between p-3 rounded-xl mb-5 ${dk?'bg-gray-700':'bg-gray-50'}`}>
-          <div>
-            <p className="text-sm font-medium">Microsoft Graph Email</p>
-            <p className={`text-xs ${sub}`}>Emails fire automatically when Azure credentials are saved below</p>
+        {/* ── Provider selector ── */}
+        <div className={`mb-6 p-4 rounded-xl border space-y-3 ${dk?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-200'}`}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500 mb-2">Email Provider</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {[
+              { val:'graph',   label:'📊 Microsoft Graph', desc:'Office 365 / Azure AD' },
+              { val:'emailjs', label:'✉️ EmailJS',          desc:'No backend required'  },
+              { val:'both',    label:'🔀 Both (dual-send)', desc:'Redundant delivery'   },
+            ].map(({val,label,desc})=>(
+              <button key={val} onClick={()=>set('emailProvider',val)}
+                className={`p-3 rounded-xl border-2 text-left transition-all ${settings.emailProvider===val?'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30':'border-transparent bg-white dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-500'}`}>
+                <p className="text-sm font-semibold">{label}</p>
+                <p className={`text-xs mt-0.5 ${sub}`}>{desc}</p>
+              </button>
+            ))}
           </div>
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.msClientId && settings.msTenantId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-            <span className={`w-2 h-2 rounded-full ${settings.msClientId && settings.msTenantId ? 'bg-green-500' : 'bg-amber-400'}`} />
-            {settings.msClientId && settings.msTenantId ? 'Configured' : 'Keys missing'}
-          </span>
+          <div className={`mt-2 p-2.5 rounded-lg text-xs flex items-start gap-2 ${dk?'bg-gray-700 text-gray-300':'bg-white text-gray-600 border border-gray-200'}`}>
+            {settings.emailProvider==='graph'   && <><span>🔵</span><span>Emails are sent from your <strong>Microsoft 365 mailbox</strong> via the Graph API. A browser login popup will appear on first use to authenticate.</span></>}
+            {settings.emailProvider==='emailjs' && <><span>🟡</span><span>Emails are sent via the <strong>EmailJS service</strong> — no Office 365 account needed. Requires a free EmailJS account and a configured template.</span></>}
+            {settings.emailProvider==='both'    && <><span>🟢</span><span><strong>Both providers fire simultaneously</strong> for each event. Use this for maximum redundancy — if one fails the other delivers.</span></>}
+          </div>
         </div>
 
-        {/* Setup steps */}
-        <div className={`mb-5 p-4 rounded-xl border text-xs space-y-2 ${dk?'bg-blue-900/20 border-blue-800/40 text-blue-300':'bg-blue-50 border-blue-100 text-blue-700'}`}>
-          <p className="font-semibold text-sm mb-2">⚡ Azure App Registration (one-time, ~5 minutes)</p>
-          <p>1. Go to <strong>portal.azure.com</strong> → <em>Azure Active Directory</em> → <em>App registrations</em> → <em>New registration</em>.</p>
-          <p className="pl-3">Name: <code className="font-mono">LegalComp Pro</code> · Supported account types: <em>Accounts in this organizational directory only</em></p>
-          <p className="pl-3">Redirect URI: <code className="font-mono">Single-page application (SPA)</code> → paste your app URL (e.g. <code className="font-mono">https://yourapp.com</code>)</p>
-          <p>2. After registration, copy the <strong>Application (Client) ID</strong> and <strong>Directory (Tenant) ID</strong> — paste below.</p>
-          <p>3. Go to <em>API permissions</em> → <em>Add permission</em> → <em>Microsoft Graph</em> → <em>Delegated</em> → add <code className="font-mono">Mail.Send</code> and <code className="font-mono">User.Read</code>.</p>
-          <p className="pl-3">Click <em>Grant admin consent</em>.</p>
-          <p>4. Paste the credentials below, set recipient email, click <em>Save All Settings</em>, then <em>Send Test Email</em>.</p>
-          <p className="pl-3">A browser popup will ask you to sign in with your Microsoft 365 account on first use.</p>
+        {/* ── Shared recipient fields ── */}
+        <div className="grid grid-cols-2 gap-4 mb-5">
+          <FormField label="Office 365 / Sender Email (From)">
+            <input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} placeholder="you@company.com" />
+          </FormField>
+          <FormField label="Recipient Email (To — all providers)">
+            <input type="email" value={settings.msToEmail} onChange={e=>set('msToEmail',e.target.value)} className={inputCls} placeholder="compliance@company.com" />
+          </FormField>
         </div>
 
-        <div className="space-y-4">
-          {/* Sender/Recipient */}
-          <div className="grid grid-cols-2 gap-4">
-            <FormField label="Office 365 Email (From / Sender)">
-              <input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
-            </FormField>
-            <FormField label="Recipient Email (To)">
-              <input type="email" value={settings.msToEmail} onChange={e=>set('msToEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
-            </FormField>
-          </div>
-
-          {/* Azure credentials */}
-          <div className={`p-4 rounded-xl border space-y-4 ${dk?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-200'}`}>
-            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">Azure AD Credentials</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <FormField label="Application (Client) ID" required>
-                <input value={settings.msClientId} onChange={e=>set('msClientId',e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className={inputCls} />
-              </FormField>
-              <FormField label="Directory (Tenant) ID" required>
-                <input value={settings.msTenantId} onChange={e=>set('msTenantId',e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className={inputCls} />
-              </FormField>
+        {/* ═══════ MICROSOFT GRAPH SECTION ═══════ */}
+        {(settings.emailProvider==='graph' || settings.emailProvider==='both') && (
+          <div className={`rounded-xl border mb-5 overflow-hidden ${dk?'border-blue-800/40':'border-blue-200'}`}>
+            <div className={`px-5 py-3 flex items-center justify-between ${dk?'bg-blue-900/30':'bg-blue-50'}`}>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📊</span>
+                <div>
+                  <p className="text-sm font-semibold">Microsoft Graph API</p>
+                  <p className={`text-xs ${sub}`}>Send from your Office 365 mailbox via Azure AD</p>
+                </div>
+              </div>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.msClientId && settings.msTenantId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                <span className={`w-2 h-2 rounded-full ${settings.msClientId && settings.msTenantId ? 'bg-green-500' : 'bg-amber-400'}`} />
+                {settings.msClientId && settings.msTenantId ? 'Configured' : 'Keys missing'}
+              </span>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Setup guide */}
+              <div className={`p-4 rounded-xl border text-xs space-y-2 ${dk?'bg-blue-900/20 border-blue-800/40 text-blue-300':'bg-blue-50 border-blue-100 text-blue-700'}`}>
+                <p className="font-semibold text-sm mb-2">⚡ Azure App Registration (one-time, ~5 min)</p>
+                <p>1. <strong>portal.azure.com</strong> → Azure Active Directory → App registrations → New registration.</p>
+                <p className="pl-3">Name: <code className="font-mono">LegalComp Pro</code> · Account types: <em>This directory only</em></p>
+                <p className="pl-3">Redirect URI: <code className="font-mono">SPA</code> → your app URL (e.g. <code className="font-mono">https://yourapp.com</code>)</p>
+                <p>2. Copy <strong>Application (Client) ID</strong> and <strong>Directory (Tenant) ID</strong> → paste below.</p>
+                <p>3. API permissions → Add → Microsoft Graph → Delegated → <code className="font-mono">Mail.Send</code> + <code className="font-mono">User.Read</code> → Grant admin consent.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField label="Application (Client) ID" required>
+                  <input value={settings.msClientId} onChange={e=>set('msClientId',e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className={inputCls} />
+                </FormField>
+                <FormField label="Directory (Tenant) ID" required>
+                  <input value={settings.msTenantId} onChange={e=>set('msTenantId',e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className={inputCls} />
+                </FormField>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button onClick={sendTestEmail} disabled={emailTestStatus==='sending'}
+                  className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center gap-2
+                    ${emailTestStatus==='sending'?'bg-indigo-400 text-white cursor-wait':'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200'}`}>
+                  {emailTestStatus==='sending'
+                    ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"/>Sending…</>
+                    : '📧 Test MS Graph Email'}
+                </button>
+                {emailTestStatus==='success' && <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">✅ {emailTestMsg}</span>}
+                {emailTestStatus==='error'   && <span className="flex items-center gap-1.5 text-sm font-medium text-red-500 max-w-xs">❌ {emailTestMsg}</span>}
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Test button + status */}
-          <div className="flex flex-wrap items-center gap-3">
-            <button onClick={sendTestEmail} disabled={emailTestStatus==='sending'}
-              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center gap-2
-                ${emailTestStatus==='sending'?'bg-indigo-400 text-white cursor-wait':'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200'}`}>
-              {emailTestStatus==='sending'
-                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"/>Sending…</>
-                : '📧 Send Test Email'}
-            </button>
-            {emailTestStatus==='success' && (
-              <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
-                ✅ {emailTestMsg}
+        {/* ═══════ EMAILJS SECTION ═══════ */}
+        {(settings.emailProvider==='emailjs' || settings.emailProvider==='both') && (
+          <div className={`rounded-xl border overflow-hidden ${dk?'border-yellow-800/40':'border-yellow-200'}`}>
+            <div className={`px-5 py-3 flex items-center justify-between ${dk?'bg-yellow-900/20':'bg-yellow-50'}`}>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">✉️</span>
+                <div>
+                  <p className="text-sm font-semibold">EmailJS</p>
+                  <p className={`text-xs ${sub}`}>Client-side email — no backend, no server needed</p>
+                </div>
+              </div>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.ejsServiceId && settings.ejsTemplateId && settings.ejsPublicKey ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                <span className={`w-2 h-2 rounded-full ${settings.ejsServiceId && settings.ejsTemplateId && settings.ejsPublicKey ? 'bg-green-500' : 'bg-amber-400'}`} />
+                {settings.ejsServiceId && settings.ejsTemplateId && settings.ejsPublicKey ? 'Configured' : 'Keys missing'}
               </span>
-            )}
-            {emailTestStatus==='error' && (
-              <span className="flex items-center gap-1.5 text-sm font-medium text-red-500 max-w-xs">
-                ❌ {emailTestMsg}
-              </span>
-            )}
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Setup guide */}
+              <div className={`p-4 rounded-xl border text-xs space-y-2 ${dk?'bg-yellow-900/20 border-yellow-800/40 text-yellow-300':'bg-yellow-50 border-yellow-100 text-yellow-700'}`}>
+                <p className="font-semibold text-sm mb-2">⚡ EmailJS Setup (one-time, ~3 min)</p>
+                <p>1. Go to <strong>emailjs.com</strong> → Sign up (free tier: 200 emails/month) → <em>Email Services</em> → Connect Gmail / Outlook / SMTP.</p>
+                <p>2. <em>Email Templates</em> → Create template. Use these variables in your template body:</p>
+                <div className={`font-mono text-xs p-2.5 rounded-lg mt-1 mb-1 leading-relaxed ${dk?'bg-gray-900 text-green-400':'bg-gray-900 text-green-400'}`}>
+                  {'{{to_name}}'} · {'{{subject}}'} · {'{{trigger_label}}'} · {'{{opening_line}}'}<br/>
+                  {'{{req_title}}'} · {'{{req_status}}'} · {'{{req_priority}}'} · {'{{req_due_date}}'}<br/>
+                  {'{{plant_name}}'} · {'{{plant_state}}'} · {'{{assignee_name}}'} · {'{{assignee_email}}'}<br/>
+                  {'{{closing_remark}}'} · {'{{portal_link}}'} · {'{{sent_date}}'}
+                </div>
+                <p>3. Copy your <strong>Service ID</strong>, <strong>Template ID</strong>, and <strong>Public Key</strong> (Account → API Keys) → paste below.</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <FormField label="Service ID" required>
+                  <input value={settings.ejsServiceId} onChange={e=>set('ejsServiceId',e.target.value)}
+                    placeholder="service_xxxxxxx" className={inputCls} />
+                </FormField>
+                <FormField label="Template ID" required>
+                  <input value={settings.ejsTemplateId} onChange={e=>set('ejsTemplateId',e.target.value)}
+                    placeholder="template_xxxxxxx" className={inputCls} />
+                </FormField>
+                <FormField label="Public Key" required>
+                  <div className="relative">
+                    <input
+                      type={ejsShowPass?'text':'password'}
+                      value={settings.ejsPublicKey}
+                      onChange={e=>set('ejsPublicKey',e.target.value)}
+                      placeholder="xxxxxxxxxxxxxxxxxxxx"
+                      className={inputCls + ' pr-10'}
+                    />
+                    <button type="button" onClick={()=>setEjsShowPass(v=>!v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs">
+                      {ejsShowPass?'🙈':'👁️'}
+                    </button>
+                  </div>
+                </FormField>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button onClick={sendTestEmailJs} disabled={ejsTestStatus==='sending'}
+                  className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center gap-2
+                    ${ejsTestStatus==='sending'?'bg-yellow-400 text-white cursor-wait':'bg-yellow-500 hover:bg-yellow-600 text-white shadow-md shadow-yellow-200'}`}>
+                  {ejsTestStatus==='sending'
+                    ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"/>Sending…</>
+                    : '✉️ Test EmailJS Email'}
+                </button>
+                {ejsTestStatus==='success' && <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">✅ {ejsTestMsg}</span>}
+                {ejsTestStatus==='error'   && <span className="flex items-center gap-1.5 text-sm font-medium text-red-500 max-w-xs">❌ {ejsTestMsg}</span>}
+              </div>
+
+              <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${dk?'bg-gray-700 text-gray-300 border border-gray-600':'bg-gray-50 border border-gray-200 text-gray-600'}`}>
+                <span>💡</span>
+                <span>EmailJS sends emails directly from the browser — no backend needed. Free tier allows <strong>200 emails/month</strong>. The <code className="font-mono">to_email</code> field above ("Recipient Email") is used as the delivery address.</span>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className={card}>
