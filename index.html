@@ -23,7 +23,11 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- Microsoft MSAL – Azure AD / Microsoft Graph token acquisition -->
-  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <script src="https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"
+    onerror="console.error('❌ MSAL failed to load from unpkg. Trying jsDelivr fallback…');
+             var s=document.createElement('script');
+             s.src='https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js';
+             document.head.appendChild(s);"></script>
 
   <!-- Firebase SDK (compat build) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -736,6 +740,12 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
  * Requires adminSettings: { msClientId, msTenantId }
  */
 async function getMSGraphToken(cfg) {
+  if (typeof msal === 'undefined') {
+    throw new Error(
+      'MSAL library failed to load. Please check your internet connection and try refreshing the page. ' +
+      'If the problem persists, ensure your network allows access to unpkg.com or cdn.jsdelivr.net.'
+    );
+  }
   if (!cfg.msClientId || !cfg.msTenantId) {
     throw new Error('Azure App (Client) ID and Tenant ID are required.');
   }
