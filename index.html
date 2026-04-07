@@ -22,8 +22,8 @@
   <!-- Babel standalone (transpile JSX in browser) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- EmailJS – sends real email via SMTP relay from the browser -->
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- Microsoft MSAL – Azure AD / Microsoft Graph token acquisition -->
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 
   <!-- Firebase SDK (compat build) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -725,194 +725,243 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
 }
 
 /* ═══════════════════════════════════════════
-   EMAILJS HELPER  – called from every trigger
+   MICROSOFT GRAPH API HELPER
+   – replaces EmailJS; uses Azure AD (MSAL)
+     + Microsoft Graph /sendMail endpoint
 ═══════════════════════════════════════════ */
+
+/**
+ * getMSGraphToken()
+ * Acquires a delegated access token from Azure AD using MSAL popup/silent flow.
+ * Requires adminSettings: { msClientId, msTenantId }
+ */
+async function getMSGraphToken(cfg) {
+  if (!cfg.msClientId || !cfg.msTenantId) {
+    throw new Error('Azure App (Client) ID and Tenant ID are required.');
+  }
+  const msalConfig = {
+    auth: {
+      clientId: cfg.msClientId,
+      authority: `https://login.microsoftonline.com/${cfg.msTenantId}`,
+      redirectUri: window.location.origin,
+    },
+    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+  };
+  const msalInstance = new msal.PublicClientApplication(msalConfig);
+  await msalInstance.initialize();
+
+  const request = { scopes: ['Mail.Send', 'User.Read'] };
+
+  // Try silent first (uses cached token)
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length > 0) {
+    try {
+      const silentResult = await msalInstance.acquireTokenSilent({ ...request, account: accounts[0] });
+      return silentResult.accessToken;
+    } catch (_) { /* fall through to popup */ }
+  }
+  // Interactive popup login
+  const popupResult = await msalInstance.loginPopup(request);
+  return popupResult.accessToken;
+}
+
+/**
+ * sendGraphMail(accessToken, { toEmail, subject, htmlBody })
+ * POST to Microsoft Graph /me/sendMail
+ */
+async function sendGraphMail(accessToken, { toEmail, subject, htmlBody }) {
+  const body = {
+    message: {
+      subject,
+      body: { contentType: 'HTML', content: htmlBody },
+      toRecipients: [{ emailAddress: { address: toEmail } }],
+    },
+    saveToSentItems: true,
+  };
+  const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Graph API error ${res.status}: ${errText}`);
+  }
+}
+
+/**
+ * buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, triggerLabel,
+ *                        rows, closingRemark, portalLink, sentDate })
+ * Returns a styled HTML string for the email body.
+ */
+function buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, triggerLabel,
+                                rows, closingRemark, portalLink, sentDate }) {
+  const rowsHtml = rows.map(([icon, label, value]) =>
+    value ? `<tr>
+      <td style="padding:5px 0;font-family:'Courier New',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;">
+        &nbsp;&nbsp;${icon} ${label}: <strong style="color:#a5b4fc;">${value}</strong>
+      </td>
+    </tr>` : ''
+  ).join('');
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"/></head>
+<body style="margin:0;padding:0;background:#0f172a;font-family:'DM Sans',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;padding:32px 0;">
+    <tr><td align="center">
+      <table width="620" cellpadding="0" cellspacing="0" style="background:#1e293b;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.4);">
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 32px;">
+            <table width="100%"><tr>
+              <td>
+                <p style="margin:0;font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.5px;">⚖️ LegalComp Pro</p>
+                <p style="margin:4px 0 0;font-size:13px;color:#c4b5fd;">Compliance Management System</p>
+              </td>
+              <td align="right">
+                <span style="background:rgba(255,255,255,0.15);color:#fff;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:600;">${triggerLabel}</span>
+              </td>
+            </tr></table>
+          </td>
+        </tr>
+        <!-- Body -->
+        <tr>
+          <td style="padding:28px 32px;">
+            <p style="margin:0 0 6px;font-size:15px;font-weight:600;color:#f1f5f9;">${greeting}</p>
+            <p style="margin:0 0 20px;font-size:14px;color:#94a3b8;line-height:1.7;">${openingLine}</p>
+            <!-- Detail block -->
+            <div style="background:#0f172a;border-radius:12px;padding:18px 20px;margin-bottom:20px;">
+              <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#6366f1;letter-spacing:1.5px;text-transform:uppercase;">${sectionTitle}</p>
+              <table width="100%" cellpadding="0" cellspacing="0">${rowsHtml}</table>
+            </div>
+            <!-- Closing -->
+            <p style="margin:0 0 20px;font-size:14px;color:#94a3b8;line-height:1.7;">${closingRemark}</p>
+            <!-- CTA -->
+            <a href="${portalLink}" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:12px 26px;border-radius:10px;font-size:14px;font-weight:600;">
+              Open Compliance Portal →
+            </a>
+          </td>
+        </tr>
+        <!-- Footer -->
+        <tr>
+          <td style="background:#0f172a;padding:16px 32px;border-top:1px solid #1e293b;">
+            <p style="margin:0;font-size:12px;color:#475569;">Sent on ${sentDate} · LegalComp Pro Compliance System</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 /**
  * sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy })
  *
  * trigger: 'new_requirement' | 'status_change' | 'new_assignment' | 'reassignment'
- *          | 'plant_added' | 'plant_deleted'
+ *          | 'plant_added' | 'plant_deleted' | 'plant_updated'
  *
- * Reads EmailJS credentials from localStorage so it works from any component.
- * Sends to:
- *   1. cfg.ejsToEmail   (always – admin/compliance team)
- *   2. assignee.email   (if different and trigger involves them)
+ * Reads Microsoft Graph credentials from localStorage.
+ * Sends via Microsoft Graph API (delegated Mail.Send permission).
  */
-function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy }) {
+async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy }) {
   try {
     const raw = localStorage.getItem('adminSettings');
     if (!raw) return;
     const cfg = JSON.parse(raw);
-    if (!cfg.ejsPublicKey || !cfg.ejsServiceId || !cfg.ejsTemplateId) return;
-    if (!cfg.ejsToEmail) return;
-
-    emailjs.init(cfg.ejsPublicKey);
+    if (!cfg.msClientId || !cfg.msTenantId) return;
+    if (!cfg.msToEmail) return;
 
     // ── Shared helpers ──────────────────────────────────────────────────
     const fmtDate  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
     const calcDays = d => { const diff = Math.ceil((new Date(d) - Date.now()) / 86400000); return diff > 0 ? diff : 0; };
     const sentDate = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
     const portalLink = window.location.href.split('?')[0];
-    const byLabel    = changedBy ? `${changedBy.name}` : 'System';
-    const TD = 'style="padding:4px 0;font-family:\'Courier New\',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;"';
+    const byLabel    = changedBy ? changedBy.name : 'System';
 
-    // ── HTML row builders (return '' to hide a row) ─────────────────────
-    const rowAssignee = (name, email, dept) =>
-      `<tr><td ${TD}>&nbsp;&nbsp;👤 Assigned To: <strong style="color:#a5b4fc;">${name}</strong> (${email})</td></tr>` +
-      `<tr><td ${TD}>&nbsp;&nbsp;🏢 Department:&nbsp;<strong style="color:#a5b4fc;">${dept || '—'}</strong></td></tr>`;
-
-    const rowCategory = (cat) =>
-      `<tr><td ${TD}>&nbsp;&nbsp;🏷️ Category:&nbsp;&nbsp;&nbsp;<strong style="color:#a5b4fc;">${cat}</strong></td></tr>`;
-
-    const rowDaysLeft = (days) =>
-      `<tr><td ${TD}>&nbsp;&nbsp;⌛ Remaining:&nbsp;&nbsp;<strong style="color:#a5b4fc;">${days} days</strong></td></tr>`;
-
-    const rowStatus = (status) =>
-      `<tr><td ${TD}>&nbsp;&nbsp;⏳ Status:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong style="color:#a5b4fc;">${status}</strong></td></tr>`;
-
-    const rowReminder = (freq) =>
-      `<tr><td ${TD}>&nbsp;&nbsp;🔔 Reminder:&nbsp;&nbsp;&nbsp;<strong style="color:#a5b4fc;">${freq}</strong></td></tr>`;
-
-    const rowEscLvl = (lvl) =>
-      `<tr><td ${TD}>&nbsp;&nbsp;⬆️ Escalation:&nbsp;<strong style="color:#c4b5fd;">${lvl}</strong></td></tr>`;
-
-    const blockDesc = (desc) =>
-      `<tr><td style="padding:6px 0 12px;font-family:'Courier New',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;">` +
-      `📝 Description:<br/><span style="color:#cbd5e1;">${desc}</span></td></tr>` +
-      `<tr><td style="padding:4px 0;"><hr style="border:none;border-top:1px solid #334155;"/></td></tr>`;
-
-    const blockActionSteps = (title, html) =>
-      `<tr><td style="padding:10px 0 4px;font-family:'Courier New',monospace;font-size:14px;color:#e2e8f0;line-height:1.7;">` +
-      `⚡ <strong>${title}</strong></td></tr>` +
-      `<tr><td style="padding:4px 0 12px;font-family:'Courier New',monospace;font-size:14px;color:#cbd5e1;line-height:1.9;">${html}</td></tr>`;
-
-    const rowEscNotice = (line) =>
-      `<tr><td style="padding:6px 0 14px;font-family:'Courier New',monospace;font-size:13px;color:#fca5a5;line-height:1.7;">${line}</td></tr>`;
-
-    // ── Base payload (always sent) ──────────────────────────────────────
-    const base = {
-      from_name:          'LegalComp Pro',
-      signoff_line:       'Compliance Management System',
-      sent_date:          sentDate,
-      portal_link:        portalLink,
-      portal_link_label:  'Open Compliance Portal →',
-      task_title:         req?.title    || '—',
-      task_category:      req?.category || '—',
-      task_priority:      req?.priority || '—',
-      task_status:        req?.status   || '—',
-      task_desc:          req?.description || '—',
-      due_date:           fmtDate(req?.dueDate),
-      due_date_label:     'Due Date:',
-      plant_name:         plant?.name  || '—',
-      plant_state:        plant?.state || '—',
-      to_name:            assignee?.name  || 'Compliance Team',
-      to_email:           assignee?.email || cfg.ejsToEmail,
-      assignee_dept:      assignee?.dept  || '—',
-      escalation_lvl:     req?.escalationLevel ? `Level ${req.escalationLevel}` : '—',
-      // conditional rows — default all empty (hidden)
-      row_assignee:       '',
-      row_category:       '',
-      row_days_left:      '',
-      row_status:         '',
-      row_reminder:       '',
-      row_escalation_lvl: '',
-      block_desc:         '',
-      block_action_steps: '',
-      row_esc_notice:     '',
-      // text fields
-      greeting:           'Dear Compliance Team,',
-      opening_line:       '',
-      section_title:      'REQUIREMENT DETAILS',
-      trigger_label:      'Notification',
-      closing_remark:     'Please log in to the compliance portal to review and take action.',
-    };
-
-    // ── Per-trigger config ──────────────────────────────────────────────
-    let subject = '';
+    // ── Per-trigger subject, greeting, openingLine, rows, closing ───────
+    let subject = '', greeting = 'Dear Compliance Team,', openingLine = '';
+    let sectionTitle = 'REQUIREMENT DETAILS', triggerLabel = 'Notification', closingRemark = '';
+    let baseRows = [];
     let extrasByRecipient = {};
 
+    const reqRows = () => [
+      ['📋','Title',        req?.title],
+      ['🏷️','Category',    req?.category],
+      ['⚡','Priority',     req?.priority],
+      ['⏳','Status',       req?.status],
+      ['📅','Due Date',     fmtDate(req?.dueDate)],
+      ['⌛','Days Left',    req?.dueDate ? `${calcDays(req.dueDate)} days` : null],
+      ['🔔','Reminder',     req?.reminderFrequency],
+      ['🏭','Plant',        plant ? `${plant.name} (${plant.state})` : null],
+      ['⬆️','Escalation',   req?.escalationLevel ? `Level ${req.escalationLevel}` : null],
+    ];
+
     if (trigger === 'new_requirement') {
-      subject = `[LegalComp] New Requirement Added: ${req?.title}`;
-      const days = req?.dueDate ? calcDays(req.dueDate) : null;
-      Object.assign(base, {
-        trigger_label:  'New Requirement',
-        greeting:       'Dear Compliance Team,',
-        opening_line:   'A new compliance requirement has been created in the system and is ready for action.',
-        section_title:  'REQUIREMENT DETAILS',
-        row_category:   rowCategory(req?.category),
-        row_days_left:  days !== null ? rowDaysLeft(days) : '',
-        row_reminder:   req?.reminderFrequency ? rowReminder(req.reminderFrequency) : '',
-        row_assignee:   assignee ? rowAssignee(assignee.name, assignee.email, assignee.dept) : '',
-        block_desc:     req?.description ? blockDesc(req.description) : '',
-        closing_remark: 'Please ensure the requirement is reviewed and assigned promptly.',
-      });
+      subject       = `[LegalComp] New Requirement Added: ${req?.title}`;
+      triggerLabel  = 'New Requirement';
+      openingLine   = 'A new compliance requirement has been created in the system and is ready for action.';
+      closingRemark = 'Please ensure the requirement is reviewed and assigned promptly.';
+      baseRows = [
+        ...reqRows(),
+        ['👤','Assigned To', assignee ? `${assignee.name} (${assignee.dept || '—'})` : null],
+        ['📝','Description', req?.description],
+      ];
 
     } else if (trigger === 'new_assignment') {
-      subject = `[LegalComp] New Compliance Task Assigned to You: ${req?.title}`;
-      const days = req?.dueDate ? calcDays(req.dueDate) : 0;
-      // ── Admin recipient sees assignee block; assignee does not ──
-      extrasByRecipient[cfg.ejsToEmail] = {
-        greeting:     'Dear Compliance Team,',
-        row_assignee: assignee ? rowAssignee(assignee.name, assignee.email, assignee.dept) : '',
+      subject       = `[LegalComp] New Compliance Task Assigned to You: ${req?.title}`;
+      sectionTitle  = 'ASSIGNED REQUIREMENT DETAILS';
+      triggerLabel  = 'New Assignment';
+      openingLine   = 'A compliance requirement has been assigned. Please review the details below and take the necessary action before the due date.';
+      closingRemark = 'Please log in to the compliance portal to review the requirement, upload evidence and update the status once completed.';
+      extrasByRecipient[cfg.msToEmail] = {
+        greeting:    'Dear Compliance Team,',
+        extraRows:   [['👤','Assigned To', assignee ? `${assignee.name} (${assignee.email})` : null]],
       };
-      if (assignee?.email && assignee.email !== cfg.ejsToEmail) {
+      if (assignee?.email && assignee.email !== cfg.msToEmail) {
         extrasByRecipient[assignee.email] = {
-          greeting:     `Dear ${assignee.name},`,
-          row_assignee: '',
+          greeting:  `Dear ${assignee.name},`,
+          extraRows: [],
         };
       }
-      Object.assign(base, {
-        trigger_label:  'New Assignment',
-        opening_line:   'A compliance requirement has been assigned. Please review the details below and take the necessary action before the due date.',
-        section_title:  'ASSIGNED REQUIREMENT DETAILS',
-        row_category:   rowCategory(req?.category),
-        row_days_left:  rowDaysLeft(days),
-        row_reminder:   req?.reminderFrequency ? rowReminder(req.reminderFrequency) : '',
-        block_desc:     req?.description ? blockDesc(req.description) : '',
-        closing_remark: 'Please log in to the compliance portal to review the requirement, upload evidence and update the status once completed.',
-      });
+      baseRows = [...reqRows(), ['📝','Description', req?.description]];
 
     } else if (trigger === 'status_change') {
-      subject = `[LegalComp] Status Updated → ${req?.status}: ${req?.title}`;
-      const days = req?.dueDate ? calcDays(req.dueDate) : null;
-      Object.assign(base, {
-        trigger_label:  'Status Updated',
-        greeting:       assignee ? `Dear ${assignee.name},` : 'Dear Compliance Team,',
-        opening_line:   `The status of a compliance requirement has been updated from "${oldStatus}" to "${req?.status}".`,
-        section_title:  'UPDATED REQUIREMENT DETAILS',
-        row_category:   rowCategory(req?.category),
-        row_status:     rowStatus(req?.status),
-        row_days_left:  (req?.status !== 'Completed' && days !== null) ? rowDaysLeft(days) : '',
-        closing_remark: 'Please review the updated status and ensure all compliance actions are on track.',
-      });
+      subject       = `[LegalComp] Status Updated → ${req?.status}: ${req?.title}`;
+      sectionTitle  = 'UPDATED REQUIREMENT DETAILS';
+      triggerLabel  = 'Status Updated';
+      greeting      = assignee ? `Dear ${assignee.name},` : 'Dear Compliance Team,';
+      openingLine   = `The status of a compliance requirement has been updated from "${oldStatus}" to "${req?.status}".`;
+      closingRemark = 'Please review the updated status and ensure all compliance actions are on track.';
+      baseRows = reqRows();
 
     } else if (trigger === 'reassignment') {
       const oldLabel = oldAssignee ? `${oldAssignee.name} (${oldAssignee.email})` : 'Unassigned';
-      subject = `[LegalComp] Requirement Reassigned: ${req?.title}`;
-      const days = req?.dueDate ? calcDays(req.dueDate) : 0;
-      extrasByRecipient[cfg.ejsToEmail] = {
-        greeting:     'Dear Compliance Team,',
-        opening_line: `A compliance requirement has been reassigned from ${oldLabel} to ${assignee?.name || 'a new team member'}.`,
-        row_assignee: assignee ? rowAssignee(assignee.name, assignee.email, assignee.dept) : '',
+      subject       = `[LegalComp] Requirement Reassigned: ${req?.title}`;
+      sectionTitle  = 'REASSIGNMENT DETAILS';
+      triggerLabel  = 'Reassigned';
+      closingRemark = 'Please log in to the compliance portal to review and begin work on this requirement.';
+      extrasByRecipient[cfg.msToEmail] = {
+        greeting:    'Dear Compliance Team,',
+        openingLine: `A compliance requirement has been reassigned from ${oldLabel} to ${assignee?.name || 'a new team member'}.`,
+        extraRows:   [['👤','New Assignee', assignee ? `${assignee.name} (${assignee.email})` : null]],
       };
-      if (assignee?.email && assignee.email !== cfg.ejsToEmail) {
+      if (assignee?.email && assignee.email !== cfg.msToEmail) {
         extrasByRecipient[assignee.email] = {
-          greeting:     `Dear ${assignee.name},`,
-          opening_line: 'A compliance requirement has been reassigned to you. Please review the details and take ownership immediately.',
-          row_assignee: '',
+          greeting:    `Dear ${assignee.name},`,
+          openingLine: 'A compliance requirement has been reassigned to you. Please review the details and take ownership immediately.',
+          extraRows:   [],
         };
       }
-      Object.assign(base, {
-        trigger_label:  'Reassigned',
-        section_title:  'REASSIGNMENT DETAILS',
-        row_category:   rowCategory(req?.category),
-        row_days_left:  rowDaysLeft(days),
-        row_reminder:   req?.reminderFrequency ? rowReminder(req.reminderFrequency) : '',
-        closing_remark: 'Please log in to the compliance portal to review and begin work on this requirement.',
-      });
+      baseRows = reqRows();
 
     } else if (['plant_added','plant_deleted','plant_updated'].includes(trigger)) {
-      const labels = { plant_added:'Plant Added', plant_deleted:'Plant Removed', plant_updated:'Plant Updated' };
+      const labels  = { plant_added:'Plant Added', plant_deleted:'Plant Removed', plant_updated:'Plant Updated' };
       const openings = {
         plant_added:   `A new plant location has been added to the LegalComp system by ${byLabel}.`,
         plant_deleted: `A plant location has been removed from the LegalComp system by ${byLabel}.`,
@@ -923,39 +972,49 @@ function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldSta
         plant_deleted: 'Please archive all related compliance records for this plant.',
         plant_updated: 'Please verify the updated plant details in the compliance portal.',
       };
-      subject = `[LegalComp] ${labels[trigger]}: ${plant?.name}`;
-      Object.assign(base, {
-        trigger_label:  labels[trigger],
-        greeting:       'Dear Compliance Team,',
-        opening_line:   openings[trigger],
-        section_title:  'PLANT DETAILS',
-        task_title:     plant?.name  || '—',
-        plant_name:     plant?.name  || '—',
-        plant_state:    plant?.state || '—',
-        task_priority:  '—',
-        due_date:       '—',
-        closing_remark: closings[trigger],
-      });
+      subject       = `[LegalComp] ${labels[trigger]}: ${plant?.name}`;
+      sectionTitle  = 'PLANT DETAILS';
+      triggerLabel  = labels[trigger];
+      openingLine   = openings[trigger];
+      closingRemark = closings[trigger];
+      baseRows = [
+        ['🏭','Plant Name',  plant?.name],
+        ['📍','State',       plant?.state],
+        ['👤','Changed By',  byLabel],
+      ];
     } else {
       return;
     }
 
+    // ── Acquire Graph token once ────────────────────────────────────────
+    const accessToken = await getMSGraphToken(cfg);
+
     // ── Collect recipients ──────────────────────────────────────────────
-    const recipients = new Set([cfg.ejsToEmail]);
+    const recipients = new Set([cfg.msToEmail]);
     if (assignee?.email) recipients.add(assignee.email);
     if (oldAssignee?.email && trigger === 'reassignment') recipients.add(oldAssignee.email);
 
-    // ── Fire one send per recipient, merging per-recipient overrides ────
-    recipients.forEach(toEmail => {
-      const overrides = extrasByRecipient[toEmail] || {};
-      const payload = Object.assign({}, base, { subject, to_email: toEmail, reply_to: cfg.fromEmail || cfg.ejsToEmail }, overrides);
-      emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, payload)
-        .then(() => console.log(`✅ [EmailJS] ${trigger} → ${toEmail}`))
-        .catch(err => console.warn(`⚠️ [EmailJS] ${trigger} → ${toEmail} FAILED:`, err?.text || err?.message || err));
-    });
+    // ── Fire one send per recipient ─────────────────────────────────────
+    for (const toEmail of recipients) {
+      const overrides  = extrasByRecipient[toEmail] || {};
+      const finalRows  = [...baseRows, ...(overrides.extraRows || [])];
+      const htmlBody   = buildComplianceHtml({
+        subject,
+        greeting:      overrides.greeting    || greeting,
+        openingLine:   overrides.openingLine || openingLine,
+        sectionTitle,
+        triggerLabel,
+        rows:          finalRows,
+        closingRemark,
+        portalLink,
+        sentDate,
+      });
+      await sendGraphMail(accessToken, { toEmail, subject, htmlBody });
+      console.log(`✅ [MS Graph] ${trigger} → ${toEmail}`);
+    }
 
   } catch (e) {
-    console.warn('⚠️ sendComplianceMail error:', e);
+    console.warn('⚠️ sendComplianceMail (MS Graph) error:', e?.message || e);
   }
 }
 
@@ -1843,12 +1902,11 @@ function AdminSettings({ dk }) {
       smtpUser: '',
       smtpPass: '',
       toast: false,
-      // EmailJS (browser SMTP relay)
-      ejsPublicKey: '',
-      ejsServiceId: '',
-      ejsTemplateId: '',
-      ejsToEmail: 'sushil@polyplasticsindia.com',
-      ejsEnabled: true,
+      // Microsoft Graph API (Azure AD)
+      msClientId: '',
+      msTenantId: '',
+      msToEmail: 'sushil@polyplasticsindia.com',
+      msEnabled: true,
       // Firebase
       fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
       fbAuthDomain: 'skr-task.firebaseapp.com',
@@ -1863,7 +1921,6 @@ function AdminSettings({ dk }) {
       const raw = localStorage.getItem('adminSettings');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.ejsPublicKey) emailjs.init(parsed.ejsPublicKey);
         return { ...defaults, ...parsed, toast: false };
       }
     } catch(_) {}
@@ -1877,27 +1934,26 @@ function AdminSettings({ dk }) {
 
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
 
-  // Save all settings to localStorage and re-init EmailJS
+  // Save all settings to localStorage
   const save = () => {
     try {
       const { toast: _t, ...toSave } = settings;
       storage.set('adminSettings', JSON.stringify(toSave));
-      if (settings.ejsPublicKey) emailjs.init(settings.ejsPublicKey);
     } catch(_) {}
     setSettings(s => ({ ...s, toast: true }));
   };
 
   useEffect(()=>{ if(settings.toast) setTimeout(()=>set('toast',false),3000); },[settings.toast]);
 
-  /* ── Send a real test email via EmailJS ── */
+  /* ── Send a real test email via Microsoft Graph API ── */
   const sendTestEmail = async () => {
-    if (!settings.ejsPublicKey || !settings.ejsServiceId || !settings.ejsTemplateId) {
-      setEmailTestMsg('Fill in Public Key, Service ID and Template ID first.');
+    if (!settings.msClientId || !settings.msTenantId) {
+      setEmailTestMsg('Enter your Azure App (Client) ID and Tenant ID first.');
       setEmailTestStatus('error');
       setTimeout(()=>setEmailTestStatus(null), 4000);
       return;
     }
-    if (!settings.ejsToEmail) {
+    if (!settings.msToEmail) {
       setEmailTestMsg('Enter a recipient email address.');
       setEmailTestStatus('error');
       setTimeout(()=>setEmailTestStatus(null), 4000);
@@ -1906,25 +1962,18 @@ function AdminSettings({ dk }) {
     setEmailTestStatus('sending');
     setEmailTestMsg('');
     try {
-      emailjs.init(settings.ejsPublicKey);
-      await emailjs.send(
-        settings.ejsServiceId,
-        settings.ejsTemplateId,
-        {
-          to_email:  settings.ejsToEmail,
-          to_name:   'Compliance Team',
-          from_name: 'LegalComp Pro',
-          subject:   'LegalComp Pro – Email Configuration Test',
-          message:   `This is a test email sent from LegalComp Pro on ${new Date().toLocaleString('en-IN')}.\n\nYour email configuration via smtp.office365.com is working correctly.\n\n— LegalComp Pro Compliance System`,
-          reply_to:  settings.fromEmail || settings.ejsToEmail,
-        }
-      );
+      const accessToken = await getMSGraphToken({ msClientId: settings.msClientId, msTenantId: settings.msTenantId });
+      const htmlBody = `<p>Hello,</p><p>This is a test email sent from <strong>LegalComp Pro</strong> via Microsoft Graph API on ${new Date().toLocaleString('en-IN')}.</p><p>Your Microsoft Graph email integration is working correctly.</p><p>— LegalComp Pro Compliance System</p>`;
+      await sendGraphMail(accessToken, {
+        toEmail: settings.msToEmail,
+        subject: 'LegalComp Pro – Microsoft Graph Email Test',
+        htmlBody,
+      });
       setEmailTestStatus('success');
-      setEmailTestMsg(`Email delivered to ${settings.ejsToEmail}`);
+      setEmailTestMsg(`Email delivered to ${settings.msToEmail}`);
     } catch (err) {
       setEmailTestStatus('error');
-      const msg = err?.text || err?.message || JSON.stringify(err);
-      setEmailTestMsg(`Failed: ${msg}`);
+      setEmailTestMsg(`Failed: ${err?.message || String(err)}`);
     }
     setTimeout(()=>setEmailTestStatus(null), 6000);
   };
@@ -2003,71 +2052,58 @@ function AdminSettings({ dk }) {
 
       <div className={card}>
         <h3 className="font-semibold mb-1 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
-          <span>📮</span> Email Delivery (EmailJS + Office 365 SMTP)
+          <span>📮</span> Email Delivery (Microsoft Graph API)
         </h3>
         <p className={`text-xs mb-4 ${sub}`}>
-          Browsers cannot connect to SMTP directly. EmailJS acts as a secure relay — it uses your Office 365 credentials on its server and delivers real email to your recipients.
+          Send compliance notifications directly via your Microsoft 365 account using the Microsoft Graph API. No third-party relay needed — emails are sent from your own Office 365 mailbox.
         </p>
 
         {/* Status indicator */}
         <div className={`flex items-center justify-between p-3 rounded-xl mb-5 ${dk?'bg-gray-700':'bg-gray-50'}`}>
           <div>
-            <p className="text-sm font-medium">Email Notifications</p>
-            <p className={`text-xs ${sub}`}>Emails fire automatically when credentials are saved below</p>
+            <p className="text-sm font-medium">Microsoft Graph Email</p>
+            <p className={`text-xs ${sub}`}>Emails fire automatically when Azure credentials are saved below</p>
           </div>
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.ejsPublicKey && settings.ejsServiceId && settings.ejsTemplateId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-            <span className={`w-2 h-2 rounded-full ${settings.ejsPublicKey && settings.ejsServiceId && settings.ejsTemplateId ? 'bg-green-500' : 'bg-amber-400'}`} />
-            {settings.ejsPublicKey && settings.ejsServiceId && settings.ejsTemplateId ? 'Active' : 'Keys missing'}
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.msClientId && settings.msTenantId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            <span className={`w-2 h-2 rounded-full ${settings.msClientId && settings.msTenantId ? 'bg-green-500' : 'bg-amber-400'}`} />
+            {settings.msClientId && settings.msTenantId ? 'Configured' : 'Keys missing'}
           </span>
         </div>
 
         {/* Setup steps */}
         <div className={`mb-5 p-4 rounded-xl border text-xs space-y-2 ${dk?'bg-blue-900/20 border-blue-800/40 text-blue-300':'bg-blue-50 border-blue-100 text-blue-700'}`}>
-          <p className="font-semibold text-sm mb-2">⚡ One-time setup (5 minutes)</p>
-          <p>1. Go to <strong>emailjs.com</strong> → create a free account.</p>
-          <p>2. <strong>Email Services</strong> → Add New Service → choose <em>Outlook / Office 365</em>.</p>
-          <p className="pl-3">Host: <code className="font-mono">smtp.office365.com</code> · Port: <code className="font-mono">587</code> · TLS: on</p>
-          <p className="pl-3">Enter your Office 365 email &amp; password (or an App Password if MFA is on).</p>
-          <p className="pl-3">Click <em>Connect Account</em> → copy the <strong>Service ID</strong> below.</p>
-          <p>3. <strong>Email Templates</strong> → Create Template. Paste this in the body:</p>
-          <pre className={`text-xs rounded-lg p-2 mt-1 overflow-x-auto ${dk?'bg-gray-900':'bg-white border border-blue-200'}`}>{`Subject: {{subject}}\n\nDear {{to_name}},\n\n{{message}}\n\n— {{from_name}}`}</pre>
-          <p className="pl-3">Save → copy the <strong>Template ID</strong>.</p>
-          <p>4. <strong>Account → API Keys</strong> → copy your <strong>Public Key</strong>.</p>
-          <p>5. Paste all three keys below, set recipient email, then <em>Save All Settings</em> and <em>Send Test Email</em>.</p>
+          <p className="font-semibold text-sm mb-2">⚡ Azure App Registration (one-time, ~5 minutes)</p>
+          <p>1. Go to <strong>portal.azure.com</strong> → <em>Azure Active Directory</em> → <em>App registrations</em> → <em>New registration</em>.</p>
+          <p className="pl-3">Name: <code className="font-mono">LegalComp Pro</code> · Supported account types: <em>Accounts in this organizational directory only</em></p>
+          <p className="pl-3">Redirect URI: <code className="font-mono">Single-page application (SPA)</code> → paste your app URL (e.g. <code className="font-mono">https://yourapp.com</code>)</p>
+          <p>2. After registration, copy the <strong>Application (Client) ID</strong> and <strong>Directory (Tenant) ID</strong> — paste below.</p>
+          <p>3. Go to <em>API permissions</em> → <em>Add permission</em> → <em>Microsoft Graph</em> → <em>Delegated</em> → add <code className="font-mono">Mail.Send</code> and <code className="font-mono">User.Read</code>.</p>
+          <p className="pl-3">Click <em>Grant admin consent</em>.</p>
+          <p>4. Paste the credentials below, set recipient email, click <em>Save All Settings</em>, then <em>Send Test Email</em>.</p>
+          <p className="pl-3">A browser popup will ask you to sign in with your Microsoft 365 account on first use.</p>
         </div>
 
         <div className="space-y-4">
-          {/* SMTP reference fields */}
+          {/* Sender/Recipient */}
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="SMTP Host (reference)">
-              <input value={settings.smtpHost} onChange={e=>set('smtpHost',e.target.value)} className={inputCls} placeholder="smtp.office365.com" />
-            </FormField>
-            <FormField label="SMTP Port">
-              <input value={settings.smtpPort} onChange={e=>set('smtpPort',e.target.value)} className={inputCls} placeholder="587" />
-            </FormField>
-            <FormField label="Office 365 Email (From)">
+            <FormField label="Office 365 Email (From / Sender)">
               <input type="email" value={settings.fromEmail} onChange={e=>set('fromEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
             </FormField>
             <FormField label="Recipient Email (To)">
-              <input type="email" value={settings.ejsToEmail} onChange={e=>set('ejsToEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
+              <input type="email" value={settings.msToEmail} onChange={e=>set('msToEmail',e.target.value)} className={inputCls} placeholder="sushil@polyplasticsindia.com" />
             </FormField>
           </div>
 
-          {/* EmailJS credentials */}
+          {/* Azure credentials */}
           <div className={`p-4 rounded-xl border space-y-4 ${dk?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-200'}`}>
-            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">EmailJS Credentials</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">Azure AD Credentials</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <FormField label="Public Key" required>
-                <input value={settings.ejsPublicKey} onChange={e=>set('ejsPublicKey',e.target.value)} placeholder="user_XXXXXXXXXXXXXXXXX" className={inputCls} />
+              <FormField label="Application (Client) ID" required>
+                <input value={settings.msClientId} onChange={e=>set('msClientId',e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className={inputCls} />
               </FormField>
-              <FormField label="Service ID" required>
-                <input value={settings.ejsServiceId} onChange={e=>set('ejsServiceId',e.target.value)} placeholder="service_xxxxxxx" className={inputCls} />
+              <FormField label="Directory (Tenant) ID" required>
+                <input value={settings.msTenantId} onChange={e=>set('msTenantId',e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className={inputCls} />
               </FormField>
-              <div className="sm:col-span-2">
-                <FormField label="Template ID" required>
-                  <input value={settings.ejsTemplateId} onChange={e=>set('ejsTemplateId',e.target.value)} placeholder="template_xxxxxxx" className={inputCls} />
-                </FormField>
-              </div>
             </div>
           </div>
 
