@@ -60,6 +60,10 @@
     window.db = firebase.firestore();
     window.fbAuth = firebase.auth();
     console.log("✅ Firebase initialized — project: skr-task");
+    // Help: print the exact redirect URI that must be registered in Azure AD
+    // App registrations → Authentication → Single-page application → Redirect URIs
+    const _azureRedirectUri = window.location.href.split('?')[0].split('#')[0];
+    console.info(`ℹ️  Azure AD Redirect URI to register: ${_azureRedirectUri}`);
   </script>
 
   <style>
@@ -741,6 +745,12 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
      + Microsoft Graph /sendMail endpoint
 ═══════════════════════════════════════════ */
 
+// ── MSAL singleton cache (one instance per clientId+tenantId) ──────────
+// BUG FIX: creating new PublicClientApplication() on every call caused token-cache
+// conflicts and "interaction_in_progress" errors because MSAL writes auth state to
+// localStorage and multiple instances step on each other.
+const _msalInstances = {};
+
 /**
  * getMSGraphToken()
  * Acquires a delegated access token from Azure AD using MSAL popup/silent flow.
@@ -756,16 +766,29 @@ async function getMSGraphToken(cfg) {
   if (!cfg.msClientId || !cfg.msTenantId) {
     throw new Error('Azure App (Client) ID and Tenant ID are required.');
   }
-  const msalConfig = {
-    auth: {
-      clientId: cfg.msClientId,
-      authority: `https://login.microsoftonline.com/${cfg.msTenantId}`,
-      redirectUri: window.location.origin,
-    },
-    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
-  };
-  const msalInstance = new msal.PublicClientApplication(msalConfig);
-  await msalInstance.initialize();
+
+  // BUG FIX: redirectUri was window.location.origin which equals the string "null"
+  // for file:// URLs, and may not match Azure AD registration for hosted pages.
+  // Use the full page URL (no hash/query). Register THIS exact URL in Azure AD under:
+  //   App registrations → Authentication → Redirect URIs (type: Single-page application)
+  const redirectUri = window.location.href.split('?')[0].split('#')[0];
+
+  const cacheKey = `${cfg.msClientId}::${cfg.msTenantId}`;
+  if (!_msalInstances[cacheKey]) {
+    const msalConfig = {
+      auth: {
+        clientId:    cfg.msClientId,
+        authority:   `https://login.microsoftonline.com/${cfg.msTenantId}`,
+        redirectUri,
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+    };
+    const inst = new msal.PublicClientApplication(msalConfig);
+    await inst.initialize();
+    _msalInstances[cacheKey] = inst;
+    console.log(`🔑 MSAL instance created — redirectUri: ${redirectUri}`);
+  }
+  const msalInstance = _msalInstances[cacheKey];
 
   const request = { scopes: ['Mail.Send', 'User.Read'] };
 
@@ -911,9 +934,22 @@ async function sendEmailJsMail(cfg, { toEmail, subject, plainText, templateParam
     ...(templateParams || {}),
   };
 
-  const response = await emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, params);
-  if (response.status !== 200) {
-    throw new Error(`EmailJS responded with status ${response.status}: ${response.text}`);
+  // BUG FIX: EmailJS v4 rejects (throws) on hard errors, but resolves with non-200
+  // for soft failures (e.g. bad template variable). We must check both cases.
+  // Also: the `to_email` param only reaches the recipient if your EmailJS template's
+  // "To Email" field is set to {{to_email}} in the EmailJS dashboard. If it's
+  // hardcoded in the template, every email goes to that address regardless of toEmail.
+  let response;
+  try {
+    response = await emailjs.send(cfg.ejsServiceId, cfg.ejsTemplateId, params);
+  } catch (sendErr) {
+    // EmailJS throws an object {status, text} — normalise to Error
+    const msg = sendErr?.text || sendErr?.message || String(sendErr);
+    const code = sendErr?.status ? ` (status ${sendErr.status})` : '';
+    throw new Error(`EmailJS send rejected${code}: ${msg}`);
+  }
+  if (!response || response.status !== 200) {
+    throw new Error(`EmailJS responded with status ${response?.status}: ${response?.text}`);
   }
   return response;
 }
@@ -956,8 +992,10 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
     const cfg = JSON.parse(raw);
 
     const provider = cfg.emailProvider || 'graph'; // 'graph' | 'emailjs' | 'both'
-    const useGraph  = (provider === 'graph'  || provider === 'both') || cfg.msEnabled;
-    const useEjs    = (provider === 'emailjs'|| provider === 'both') || cfg.ejsEnabled;
+    // BUG FIX: previously `|| cfg.msEnabled` caused Graph to run even when provider='emailjs',
+    // which triggered a popup that browsers block in automated flows, silently killing everything.
+    const useGraph  = provider === 'graph'  || provider === 'both';
+    const useEjs    = provider === 'emailjs' || provider === 'both';
 
     // Quick-exit if neither provider is configured
     const graphReady = useGraph  && cfg.msClientId && cfg.msTenantId && cfg.msToEmail;
@@ -2122,6 +2160,7 @@ function AdminSettings({ dk }) {
     setEmailTestStatus('sending');
     setEmailTestMsg('');
     try {
+      // Uses the singleton getMSGraphToken — ensure the redirect URI shown in console matches Azure AD registration
       const accessToken = await getMSGraphToken({ msClientId: settings.msClientId, msTenantId: settings.msTenantId });
       const htmlBody = `<p>Hello,</p><p>This is a test email sent from <strong>LegalComp Pro</strong> via Microsoft Graph API on ${new Date().toLocaleString('en-IN')}.</p><p>Your Microsoft Graph email integration is working correctly.</p><p>— LegalComp Pro Compliance System</p>`;
       await sendGraphMail(accessToken, {
