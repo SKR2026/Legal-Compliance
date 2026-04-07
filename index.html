@@ -741,13 +741,12 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
  */
 async function getMSGraphToken(cfg) {
   if (typeof msal === 'undefined') {
-    throw new Error(
-      'MSAL library failed to load. Please check your internet connection and try refreshing the page. ' +
-      'If the problem persists, ensure your network allows access to unpkg.com or cdn.jsdelivr.net.'
-    );
+    console.warn('⚠️ MSAL library not loaded — email notifications disabled.');
+    return null;
   }
   if (!cfg.msClientId || !cfg.msTenantId) {
-    throw new Error('Azure App (Client) ID and Tenant ID are required.');
+    console.warn('⚠️ Azure Client ID / Tenant ID not configured — email notifications disabled.');
+    return null;
   }
   const msalConfig = {
     auth: {
@@ -757,22 +756,39 @@ async function getMSGraphToken(cfg) {
     },
     cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
   };
-  const msalInstance = new msal.PublicClientApplication(msalConfig);
-  await msalInstance.initialize();
+  try {
+    const msalInstance = new msal.PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
 
-  const request = { scopes: ['Mail.Send', 'User.Read'] };
+    const request = { scopes: ['Mail.Send', 'User.Read'] };
 
-  // Try silent first (uses cached token)
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    try {
-      const silentResult = await msalInstance.acquireTokenSilent({ ...request, account: accounts[0] });
-      return silentResult.accessToken;
-    } catch (_) { /* fall through to popup */ }
+    // Try silent first (uses cached token)
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      try {
+        const silentResult = await msalInstance.acquireTokenSilent({ ...request, account: accounts[0] });
+        return silentResult.accessToken;
+      } catch (_) { /* fall through to popup */ }
+    }
+    // Interactive popup login
+    const popupResult = await msalInstance.loginPopup(request);
+    return popupResult.accessToken;
+  } catch (e) {
+    // user_cancelled, popup_window_error, user_cancelled_error, etc. — all treated as non-fatal
+    const errCode = e?.errorCode || e?.name || '';
+    if (
+      errCode.includes('user_cancelled') ||
+      errCode.includes('popup_window_error') ||
+      errCode.includes('user_closed') ||
+      errCode.includes('interaction_in_progress') ||
+      (e?.message || '').toLowerCase().includes('cancel')
+    ) {
+      console.info('ℹ️ Email login popup closed — email notification skipped.');
+    } else {
+      console.warn('⚠️ getMSGraphToken error:', e?.message || e);
+    }
+    return null;
   }
-  // Interactive popup login
-  const popupResult = await msalInstance.loginPopup(request);
-  return popupResult.accessToken;
 }
 
 /**
@@ -886,6 +902,8 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
     const cfg = JSON.parse(raw);
     if (!cfg.msClientId || !cfg.msTenantId) return;
     if (!cfg.msToEmail) return;
+    // Respect the "Enable Email Notifications" toggle
+    if (cfg.msEnabled === false) return;
 
     // ── Shared helpers ──────────────────────────────────────────────────
     const fmtDate  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -998,6 +1016,8 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
 
     // ── Acquire Graph token once ────────────────────────────────────────
     const accessToken = await getMSGraphToken(cfg);
+    // If token is null (user cancelled popup, or MSAL not configured), skip silently
+    if (!accessToken) return;
 
     // ── Collect recipients ──────────────────────────────────────────────
     const recipients = new Set([cfg.msToEmail]);
@@ -1973,6 +1993,12 @@ function AdminSettings({ dk }) {
     setEmailTestMsg('');
     try {
       const accessToken = await getMSGraphToken({ msClientId: settings.msClientId, msTenantId: settings.msTenantId });
+      if (!accessToken) {
+        setEmailTestStatus('error');
+        setEmailTestMsg('Login popup was closed or cancelled. Please try again and complete the Microsoft sign-in.');
+        setTimeout(()=>setEmailTestStatus(null), 6000);
+        return;
+      }
       const htmlBody = `<p>Hello,</p><p>This is a test email sent from <strong>LegalComp Pro</strong> via Microsoft Graph API on ${new Date().toLocaleString('en-IN')}.</p><p>Your Microsoft Graph email integration is working correctly.</p><p>— LegalComp Pro Compliance System</p>`;
       await sendGraphMail(accessToken, {
         toEmail: settings.msToEmail,
@@ -2068,15 +2094,29 @@ function AdminSettings({ dk }) {
           Send compliance notifications directly via your Microsoft 365 account using the Microsoft Graph API. No third-party relay needed — emails are sent from your own Office 365 mailbox.
         </p>
 
+        {/* Enable toggle */}
+        <div className={`flex items-center justify-between p-3 rounded-xl mb-4 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+          <div>
+            <p className="text-sm font-medium">Enable Email Notifications</p>
+            <p className={`text-xs ${sub}`}>When disabled, no email popups or notifications will fire</p>
+          </div>
+          <button onClick={()=>set('msEnabled',!settings.msEnabled)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${settings.msEnabled?'bg-indigo-600':'bg-gray-300'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.msEnabled?'left-6':'left-0.5'}`} />
+          </button>
+        </div>
+
+        <div className={`space-y-4 transition-opacity ${settings.msEnabled?'opacity-100':'opacity-50 pointer-events-none'}`}>
+
         {/* Status indicator */}
         <div className={`flex items-center justify-between p-3 rounded-xl mb-5 ${dk?'bg-gray-700':'bg-gray-50'}`}>
           <div>
             <p className="text-sm font-medium">Microsoft Graph Email</p>
             <p className={`text-xs ${sub}`}>Emails fire automatically when Azure credentials are saved below</p>
           </div>
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${settings.msClientId && settings.msTenantId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-            <span className={`w-2 h-2 rounded-full ${settings.msClientId && settings.msTenantId ? 'bg-green-500' : 'bg-amber-400'}`} />
-            {settings.msClientId && settings.msTenantId ? 'Configured' : 'Keys missing'}
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${!settings.msEnabled ? 'bg-gray-100 text-gray-500' : settings.msClientId && settings.msTenantId ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            <span className={`w-2 h-2 rounded-full ${!settings.msEnabled ? 'bg-gray-400' : settings.msClientId && settings.msTenantId ? 'bg-green-500' : 'bg-amber-400'}`} />
+            {!settings.msEnabled ? 'Disabled' : settings.msClientId && settings.msTenantId ? 'Configured' : 'Keys missing'}
           </span>
         </div>
 
@@ -2137,7 +2177,7 @@ function AdminSettings({ dk }) {
               </span>
             )}
           </div>
-        </div>
+        </div>{/* end msEnabled wrapper */}
       </div>
 
       <div className={card}>
