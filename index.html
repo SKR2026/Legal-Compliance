@@ -548,7 +548,8 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
                 <div className="space-y-3">
                   {drillModal.reqs.map(req => {
                     const plant = plants.find(p=>p.id===req.plantId);
-                    const assignee = users.find(u=>u.id===req.assignedTo);
+                    const assignedIds = Array.isArray(req.assignedTo) ? req.assignedTo : (req.assignedTo ? [req.assignedTo] : []);
+                    const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
                     const dl = daysLeft(req.dueDate);
                     return (
                       <div key={req.id} className={`p-4 rounded-xl border ${dk?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-200'}`}>
@@ -563,7 +564,7 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
                         <div className="flex flex-wrap gap-3 text-xs">
                           <span className={dk?'text-gray-400':'text-gray-500'}>🏭 {plant?.name} ({plant?.state})</span>
                           <span className={dk?'text-gray-400':'text-gray-500'}>🏷️ {req.category}</span>
-                          <span className={dk?'text-gray-400':'text-gray-500'}>👤 {assignee?.name||'Unassigned'}</span>
+                          <span className={dk?'text-gray-400':'text-gray-500'}>👤 {assignees.length > 0 ? assignees.map(a=>a.name).join(', ') : 'Unassigned'}</span>
                           <span className={dl<0?'text-red-500':dl<7?'text-amber-500':dk?'text-gray-400':'text-gray-500'}>
                             📅 {formatDate(req.dueDate)}{dl<0?` (${Math.abs(dl)}d overdue)`:dl<7?` (${dl}d left)`:''}</span>
                         </div>
@@ -1217,13 +1218,22 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
 ═══════════════════════════════════════════ */
 function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, categories: catsProp }) {
   const cats = catsProp || CATEGORIES;
-  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', plantIds:[], assignedTo:'', status:'Pending', dueDate:'', completionDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'', applicableRule:'', legalClause:'' };
+  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', plantIds:[], assignedTo:[], status:'Pending', dueDate:'', completionDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'', applicableRule:'', legalClause:'' };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
-  useEffect(()=>{ setForm(initial || blank); }, [open]);
+  useEffect(()=>{
+    const init = initial ? { ...initial, assignedTo: Array.isArray(initial.assignedTo) ? initial.assignedTo : (initial.assignedTo ? [initial.assignedTo] : []) } : blank;
+    setForm(init);
+  }, [open]);
 
   const plantUsers = users.filter(u=>u.plantId===form.plantId && ['user','plant_head'].includes(u.role));
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const toggleUserAssign = (uid) => {
+    const arr = Array.isArray(form.assignedTo) ? form.assignedTo : (form.assignedTo ? [form.assignedTo] : []);
+    const idx = arr.indexOf(uid);
+    set('assignedTo', idx >= 0 ? arr.filter(x=>x!==uid) : [...arr, uid]);
+  };
 
   const save = async () => {
     // Determine plants: use plantIds if set, fall back to single plantId
@@ -1262,7 +1272,7 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, c
                       if (idx >= 0) { ids.splice(idx,1); } else { ids.push(p.id); }
                       set('plantIds', ids);
                       set('plantId', ids[0]||'');
-                      set('assignedTo','');
+                      set('assignedTo',[]);
                     }}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${selected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 dark:bg-gray-600 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-500 hover:border-indigo-400'}`}>
                     {p.name}
@@ -1275,11 +1285,31 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, c
             )}
           </div>
         </FormField>
-        <FormField label="Assign To (Email / User)">
-          <select value={form.assignedTo} onChange={e=>set('assignedTo',e.target.value)} className={selectCls} disabled={!form.plantId}>
-            <option value="">Select User</option>
-            {plantUsers.map(u=><option key={u.id} value={u.id}>{u.name} – {u.email}</option>)}
-          </select>
+        <FormField label="Assign To (User/s)">
+          {!form.plantId ? (
+            <p className="text-xs text-gray-400 italic px-3 py-2.5">Select a plant first</p>
+          ) : plantUsers.length === 0 ? (
+            <p className="text-xs text-gray-400 italic px-3 py-2.5">No users in this plant</p>
+          ) : (
+            <div className={`flex flex-wrap gap-1.5 p-2 rounded-xl border ${dk?'border-gray-600 bg-gray-700':'border-gray-200 bg-white'}`}>
+              {plantUsers.map(u => {
+                const assigned = Array.isArray(form.assignedTo) ? form.assignedTo : (form.assignedTo ? [form.assignedTo] : []);
+                const sel = assigned.includes(u.id);
+                return (
+                  <button key={u.id} type="button"
+                    onClick={() => toggleUserAssign(u.id)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${sel ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : dk?'bg-gray-600 text-gray-200 border-gray-500 hover:border-indigo-400':'bg-gray-50 text-gray-600 border-gray-200 hover:border-indigo-400'}`}>
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${sel?'bg-indigo-400 text-white':'bg-gray-300 text-gray-600'}`}>{initials(u.name)}</span>
+                    {u.name}
+                    {sel && <span className="ml-0.5 text-indigo-200">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {Array.isArray(form.assignedTo) && form.assignedTo.length > 0 && (
+            <p className="text-xs text-indigo-500 font-medium mt-1">👥 {form.assignedTo.length} user{form.assignedTo.length>1?'s':''} assigned</p>
+          )}
         </FormField>
         <FormField label="Category" required>
           <select value={form.category} onChange={e=>set('category',e.target.value)} className={selectCls}>
@@ -1424,11 +1454,12 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
     // ── Email per plant ──
     newReqs.forEach(newR => {
       const plant    = plants.find(p => p.id === newR.plantId);
-      const assignee = users.find(u => u.id === newR.assignedTo);
-      sendComplianceMail({ trigger:'new_requirement', req:newR, plant, assignee, changedBy:null });
-      if (assignee) {
+      const assignedIds = Array.isArray(newR.assignedTo) ? newR.assignedTo : (newR.assignedTo ? [newR.assignedTo] : []);
+      const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
+      sendComplianceMail({ trigger:'new_requirement', req:newR, plant, assignee:assignees[0]||null, changedBy:null });
+      assignees.forEach(assignee => {
         sendComplianceMail({ trigger:'new_assignment', req:newR, plant, assignee, changedBy:null });
-      }
+      });
     });
   };
 
@@ -1437,24 +1468,26 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
     const updated = { ...old, ...form };
     updateRequirements(requirements.map(r => r.id === editReq.id ? updated : r));
     if (!old) return;
-    const plant       = plants.find(p => p.id === updated.plantId);
-    const assignee    = users.find(u => u.id === updated.assignedTo);
-    const oldAssignee = users.find(u => u.id === old.assignedTo);
+    const plant = plants.find(p => p.id === updated.plantId);
+    const newIds = Array.isArray(updated.assignedTo) ? updated.assignedTo : (updated.assignedTo ? [updated.assignedTo] : []);
+    const oldIds = Array.isArray(old.assignedTo) ? old.assignedTo : (old.assignedTo ? [old.assignedTo] : []);
     // ── Status changed ──
     if (old.status !== updated.status) {
-      sendComplianceMail({ trigger:'status_change', req:updated, plant, assignee, oldStatus:old.status, changedBy:null });
+      const primaryAssignee = users.find(u=>u.id===newIds[0]);
+      sendComplianceMail({ trigger:'status_change', req:updated, plant, assignee:primaryAssignee||null, oldStatus:old.status, changedBy:null });
     }
     // ── Assignment changed ──
-    if (old.assignedTo !== updated.assignedTo) {
-      if (updated.assignedTo) {
-        // New person assigned
-        sendComplianceMail({ trigger:'new_assignment', req:updated, plant, assignee, changedBy:null });
-      }
-      if (old.assignedTo && old.assignedTo !== updated.assignedTo) {
-        // Reassigned away from old person
-        sendComplianceMail({ trigger:'reassignment', req:updated, plant, assignee, oldAssignee, changedBy:null });
-      }
-    }
+    const added   = newIds.filter(id=>!oldIds.includes(id));
+    const removed = oldIds.filter(id=>!newIds.includes(id));
+    added.forEach(id => {
+      const assignee = users.find(u=>u.id===id);
+      if (assignee) sendComplianceMail({ trigger:'new_assignment', req:updated, plant, assignee, changedBy:null });
+    });
+    removed.forEach(id => {
+      const oldAssignee = users.find(u=>u.id===id);
+      const primaryAssignee = users.find(u=>u.id===newIds[0]);
+      if (oldAssignee) sendComplianceMail({ trigger:'reassignment', req:updated, plant, assignee:primaryAssignee||null, oldAssignee, changedBy:null });
+    });
   };
   const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
 
@@ -1518,7 +1551,9 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
       <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide>
         {viewReq && (() => {
           const plant    = plants.find(p=>p.id===viewReq.plantId);
-          const assignee = users.find(u=>u.id===viewReq.assignedTo);
+          const assignedIds = Array.isArray(viewReq.assignedTo) ? viewReq.assignedTo : (viewReq.assignedTo ? [viewReq.assignedTo] : []);
+          const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
+          const assigneeStr = assignees.length > 0 ? assignees.map(a=>`${a.name} (${a.email})`).join(', ') : 'Unassigned';
           return (
             <div className="space-y-4 text-sm">
               <div className="flex flex-wrap gap-2">
@@ -1529,7 +1564,7 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
               </div>
               <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{viewReq.description}</p>
               <div className="grid grid-cols-2 gap-4">
-                {[['Plant',plant?.name],['State',plant?.state],['Assigned To',assignee?`${assignee.name} (${assignee.email})`:'Unassigned'],['Due Date',formatDate(viewReq.dueDate)],['Completion Date',viewReq.completionDate?formatDate(viewReq.completionDate):'—'],['Reminder',viewReq.reminderFrequency],['Escalation Email',viewReq.escalationEmail||'—']].map(([l,v])=>(
+                {[['Plant',plant?.name],['State',plant?.state],['Assigned To',assigneeStr],['Due Date',formatDate(viewReq.dueDate)],['Completion Date',viewReq.completionDate?formatDate(viewReq.completionDate):'—'],['Reminder',viewReq.reminderFrequency],['Escalation Email',viewReq.escalationEmail||'—']].map(([l,v])=>(
                   <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
                     <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${sub}`}>{l}</p>
                     <p className="font-medium text-gray-800 dark:text-white">{v||'—'}</p>
@@ -1660,7 +1695,8 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
               )}
               {filtered.map(req => {
                 const plant    = plants.find(p=>p.id===req.plantId);
-                const assignee = users.find(u=>u.id===req.assignedTo);
+                const assignedIds = Array.isArray(req.assignedTo) ? req.assignedTo : (req.assignedTo ? [req.assignedTo] : []);
+                const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
                 const dl       = daysLeft(req.dueDate);
                 const isSelected = selected.has(req.id);
                 return (
@@ -1687,10 +1723,16 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                     <td className={`px-4 py-3 whitespace-nowrap ${sub}`}>{plant?.name}</td>
                     <td className={`px-4 py-3 whitespace-nowrap ${sub}`}>{req.category}</td>
                     <td className="px-4 py-3">
-                      {assignee ? (
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(assignee.name)}</div>
-                          <span className={`text-xs ${sub} truncate max-w-[100px]`}>{assignee.name}</span>
+                      {assignees.length > 0 ? (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {assignees.slice(0,3).map(a=>(
+                            <div key={a.id} className="flex items-center gap-1" title={a.name}>
+                              <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs flex-shrink-0">{initials(a.name)}</div>
+                              {assignees.length === 1 && <span className={`text-xs ${sub} truncate max-w-[80px]`}>{a.name}</span>}
+                            </div>
+                          ))}
+                          {assignees.length > 3 && <span className={`text-xs font-semibold ${sub}`}>+{assignees.length-3}</span>}
+                          {assignees.length > 1 && <span className={`text-xs ${sub}`}>{assignees.length} users</span>}
                         </div>
                       ) : <span className="text-xs text-red-400">Unassigned</span>}
                     </td>
@@ -2781,7 +2823,7 @@ function BulkUpload({ dk, plants, users, requirements, updateRequirements, categ
         reminderFrequency: REM_FREQS.includes(obj.reminder_frequency) ? obj.reminder_frequency : 'Weekly',
         escalationLevel:  escLvl,
         escalationEmail:  obj.escalation_email || '',
-        assignedTo,
+        assignedTo: assignedTo ? [assignedTo] : [],
         applicableRule:   obj.applicable_rule || '',
         legalClause:      obj.legal_clause || '',
       });
@@ -3434,7 +3476,7 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
 
   const statusPie = STATUSES.map(s=>({ name:s, value:myReqs.filter(r=>r.status===s).length }));
   const teamUsers = users.filter(u=>u.plantId===currentUser.plantId&&u.role==='user');
-  const teamBar   = teamUsers.map(u=>({ name:u.name.split(' ')[0], Total:myReqs.filter(r=>r.assignedTo===u.id).length, Done:myReqs.filter(r=>r.assignedTo===u.id&&r.status==='Completed').length }));
+  const teamBar   = teamUsers.map(u=>({ name:u.name.split(' ')[0], Total:myReqs.filter(r=>(Array.isArray(r.assignedTo)?r.assignedTo:[r.assignedTo]).includes(u.id)).length, Done:myReqs.filter(r=>(Array.isArray(r.assignedTo)?r.assignedTo:[r.assignedTo]).includes(u.id)&&r.status==='Completed').length }));
 
   const Overview = () => (
     <div className="space-y-5">
@@ -3481,12 +3523,13 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
           <h3 className="font-semibold mb-3 text-red-500">🚨 Overdue in {myPlant?.name}</h3>
           <div className="space-y-2">
             {myReqs.filter(r=>r.status==='Overdue').map(r=>{
-              const a = users.find(u=>u.id===r.assignedTo);
+              const assignedIds = Array.isArray(r.assignedTo) ? r.assignedTo : (r.assignedTo ? [r.assignedTo] : []);
+              const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
               return (
                 <div key={r.id} className={`flex items-center justify-between p-3 rounded-xl ${dk?'bg-red-900/20 border border-red-800/30':'bg-red-50 border border-red-100'}`}>
                   <div>
                     <p className="text-sm font-medium text-red-600">{r.title}</p>
-                    <p className={`text-xs ${sub}`}>Assigned: {a?.name||'Unassigned'} · Due: {formatDate(r.dueDate)}</p>
+                    <p className={`text-xs ${sub}`}>Assigned: {assignees.length>0?assignees.map(a=>a.name).join(', '):'Unassigned'} · Due: {formatDate(r.dueDate)}</p>
                   </div>
                   <Badge label={`L${r.escalationLevel}`} color="#8b5cf6" />
                 </div>
@@ -3517,12 +3560,14 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
             </thead>
             <tbody className={`divide-y ${dk?'divide-gray-700':'divide-gray-100'}`}>
               {filtered.map(r=>{
-                const a=users.find(u=>u.id===r.assignedTo); const dl=daysLeft(r.dueDate);
+                const assignedIds = Array.isArray(r.assignedTo) ? r.assignedTo : (r.assignedTo ? [r.assignedTo] : []);
+                const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
+                const dl=daysLeft(r.dueDate);
                 return (
                   <tr key={r.id} className={dk?'hover:bg-gray-700/40':'hover:bg-slate-50'}>
                     <td className="px-4 py-3 font-medium max-w-[220px] truncate">{r.title}</td>
                     <td className={`px-4 py-3 text-xs ${sub}`}>{r.category}</td>
-                    <td className="px-4 py-3 text-xs">{a?<div className="flex items-center gap-1.5"><div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(a.name)}</div>{a.name}</div>:<span className="text-red-400">Unassigned</span>}</td>
+                    <td className="px-4 py-3 text-xs">{assignees.length>0?<div className="flex items-center gap-1 flex-wrap">{assignees.slice(0,3).map(a=><div key={a.id} className="flex items-center gap-1" title={a.name}><div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(a.name)}</div>{assignees.length===1&&<span>{a.name}</span>}</div>)}{assignees.length>3&&<span className={sub}>+{assignees.length-3}</span>}{assignees.length>1&&<span className={sub}>{assignees.length} users</span>}</div>:<span className="text-red-400">Unassigned</span>}</td>
                     <td className="px-4 py-3"><Badge label={r.priority} color={PRIORITY_CLR[r.priority]} /></td>
                     <td className="px-4 py-3"><Badge label={r.status}   color={STATUS_CLR[r.status]}   /></td>
                     <td className={`px-4 py-3 text-xs ${dl<0?'text-red-500':dl<7?'text-amber-500':sub}`}>{formatDate(r.dueDate)}</td>
@@ -3539,8 +3584,8 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
   const Team = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       {teamUsers.map(u=>{
-        const assigned  = myReqs.filter(r=>r.assignedTo===u.id).length;
-        const done      = myReqs.filter(r=>r.assignedTo===u.id&&r.status==='Completed').length;
+        const assigned  = myReqs.filter(r=>(Array.isArray(r.assignedTo)?r.assignedTo:(r.assignedTo?[r.assignedTo]:[])).includes(u.id)).length;
+        const done      = myReqs.filter(r=>(Array.isArray(r.assignedTo)?r.assignedTo:(r.assignedTo?[r.assignedTo]:[])).includes(u.id)&&r.status==='Completed').length;
         return (
           <div key={u.id} className={`${card} p-5`}>
             <div className="flex items-center gap-3 mb-4">
@@ -3576,7 +3621,7 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
 ═══════════════════════════════════════════ */
 function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updateRequirements, logout }) {
   const [activePage, setActivePage] = useState('tasks');
-  const myReqs    = requirements.filter(r=>r.assignedTo===currentUser.id);
+  const myReqs    = requirements.filter(r=>(Array.isArray(r.assignedTo)?r.assignedTo:(r.assignedTo?[r.assignedTo]:[])).includes(currentUser.id));
   const myPlant   = plants.find(p=>p.id===currentUser.plantId);
   const overdueCount = myReqs.filter(r=>r.status==='Overdue').length;
 
@@ -3600,7 +3645,8 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
     // ── Email: status change ──
     if (req && req.status !== status) {
       const plant    = plants.find(p => p.id === req.plantId);
-      const assignee = users.find(u => u.id === req.assignedTo);
+      const assignedIds = Array.isArray(req.assignedTo) ? req.assignedTo : (req.assignedTo ? [req.assignedTo] : []);
+      const assignee = users.find(u => assignedIds.includes(u.id) && u.id === currentUser.id) || users.find(u=>assignedIds.includes(u.id));
       sendComplianceMail({ trigger:'status_change', req:{...req,status}, plant, assignee, oldStatus:req.status, changedBy:currentUser });
     }
   };
