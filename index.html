@@ -521,7 +521,7 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
 
   const card = `rounded-2xl border p-5 shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
   const sub  = `text-xs ${dk?'text-gray-400':'text-gray-500'}`;
-  const TT   = { contentStyle:{ background:dk?'#1f2937':'white', border:'none', borderRadius:10, fontSize:12, boxShadow:'0 4px 20px rgba(0,0,0,0.15)' } };
+  const TT   = { contentStyle:{ background:dk?'#1f2937':'white', border:dk?'1px solid #374151':'1px solid #e5e7eb', borderRadius:10, fontSize:12, boxShadow:'0 4px 20px rgba(0,0,0,0.15)', color:dk?'#f3f4f6':'#111827' }, itemStyle:{ color:dk?'#e5e7eb':'#374151' }, labelStyle:{ color:dk?'#f9fafb':'#111827', fontWeight:600 } };
   const scopeLabel = selPlant ? plants.find(p=>p.id===selPlant)?.name : `All ${plants.length} Plants`;
 
   return (
@@ -651,7 +651,7 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
                 cursor="pointer" onClick={d=>d&&openDrill(`${selPlant?plants.find(p=>p.id===selPlant)?.name+' – ':''} ${d.name}`,scopedReqs.filter(r=>r.status===d.name))}>
                 {statusPie.map((e,i)=><Cell key={i} fill={Object.values(STATUS_CLR)[i]} />)}
               </Pie>
-              <Tooltip {...TT} />
+              <Tooltip {...TT} formatter={(value, name) => [`${value} (${total ? Math.round(value/total*100) : 0}%)`, name]} />
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-1.5 mt-2">
@@ -707,7 +707,7 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
                 cursor="pointer" onClick={d=>d&&openDrill(`Category: ${d.name} – ${scopeLabel}`,scopedReqs.filter(r=>r.category===d.name))}>
                 {catPie.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]} />)}
               </Pie>
-              <Tooltip {...TT} />
+              <Tooltip {...TT} formatter={(value, name) => [`${value} (${total ? Math.round(value/total*100) : 0}%)`, name]} />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -3472,7 +3472,7 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
   const overdue   = myReqs.filter(r=>r.status==='Overdue').length;
   const card      = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
   const sub       = dk?'text-gray-400':'text-gray-500';
-  const TT        = { contentStyle:{ background:dk?'#1f2937':'white', border:'none', borderRadius:10, fontSize:12 } };
+  const TT        = { contentStyle:{ background:dk?'#1f2937':'white', border:dk?'1px solid #374151':'1px solid #e5e7eb', borderRadius:10, fontSize:12, color:dk?'#f3f4f6':'#111827' }, itemStyle:{ color:dk?'#e5e7eb':'#374151' }, labelStyle:{ color:dk?'#f9fafb':'#111827', fontWeight:600 } };
 
   const statusPie = STATUSES.map(s=>({ name:s, value:myReqs.filter(r=>r.status===s).length }));
   const teamUsers = users.filter(u=>u.plantId===currentUser.plantId&&u.role==='user');
@@ -3499,7 +3499,7 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
                 isAnimationActive={true}>
                 {statusPie.map((e,i)=><Cell key={i} fill={Object.values(STATUS_CLR)[i]} />)}
               </Pie>
-              <Tooltip {...TT} />
+              <Tooltip {...TT} formatter={(value, name) => [`${value} (${total ? Math.round(value/total*100) : 0}%)`, name]} />
             </PieChart>
           </ResponsiveContainer>
         </div>
