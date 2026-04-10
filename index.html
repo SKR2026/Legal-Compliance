@@ -844,13 +844,42 @@ async function sendGraphMail(accessToken, { toEmail, subject, htmlBody }) {
  */
 function buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, triggerLabel,
                                 rows, closingRemark, portalLink, sentDate }) {
-  const rowsHtml = rows.map(([icon, label, value]) =>
-    value ? `<tr>
-      <td style="padding:7px 0;font-family:'Times New Roman',Times,serif;font-size:14px;color:#1a1a2e;line-height:1.8;border-bottom:1px solid #e8eaf0;">
+
+  // ── Status badge colour map ───────────────────────────────────────────────
+  const STATUS_STYLE = {
+    'Pending':     { bg:'#e9ecef', border:'#adb5bd', text:'#495057', dot:'#868e96' },
+    'In Progress': { bg:'#dbeafe', border:'#93c5fd', text:'#1e40af', dot:'#3b82f6' },
+    'Completed':   { bg:'#dcfce7', border:'#86efac', text:'#166534', dot:'#22c55e' },
+    'Overdue':     { bg:'#fee2e2', border:'#fca5a5', text:'#991b1b', dot:'#ef4444' },
+  };
+
+  // ── Row renderer: detects Status row and renders a colour badge ───────────
+  const rowsHtml = rows.map(([icon, label, value]) => {
+    if (!value) return '';
+    if (label === 'Status') {
+      const s = STATUS_STYLE[value] || STATUS_STYLE['Pending'];
+      return `<tr>
+        <td style="padding:10px 0;font-family:'Times New Roman',Times,serif;font-size:14px;color:#374151;line-height:1.8;border-bottom:1px solid #e8eaf0;">
+          &nbsp;&nbsp;${icon} <span style="color:#374151;">${label}:</span>&nbsp;
+          <span style="display:inline-flex;align-items:center;gap:6px;background:${s.bg};border:1.5px solid ${s.border};color:${s.text};padding:5px 18px 5px 14px;border-radius:50px;font-size:13px;font-weight:700;font-family:'Times New Roman',Times,serif;letter-spacing:0.3px;vertical-align:middle;">
+            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${s.dot};flex-shrink:0;"></span>${value}
+          </span>
+        </td>
+      </tr>`;
+    }
+    return `<tr>
+      <td style="padding:8px 0;font-family:'Times New Roman',Times,serif;font-size:14px;color:#1a1a2e;line-height:1.8;border-bottom:1px solid #e8eaf0;">
         &nbsp;&nbsp;${icon} <span style="color:#374151;">${label}:</span> <strong style="color:#1d3557;">${value}</strong>
       </td>
-    </tr>` : ''
-  ).join('');
+    </tr>`;
+  }).join('');
+
+  // ── Header accent bar colour driven by status found in rows ──────────────
+  const statusRow = rows.find(([, label]) => label === 'Status');
+  const statusVal = statusRow ? statusRow[2] : null;
+  const accentClr = { Pending:'#868e96', 'In Progress':'#3b82f6', Completed:'#22c55e', Overdue:'#ef4444' };
+  const accentLeft  = accentClr[statusVal] || '#457b9d';
+  const accentRight = { Pending:'#ced4da', 'In Progress':'#93c5fd', Completed:'#86efac', Overdue:'#fca5a5' }[statusVal] || '#a8dadc';
 
   return `
 <!DOCTYPE html>
@@ -859,10 +888,10 @@ function buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, tri
 <body style="margin:0;padding:0;background:#f0f2f5;font-family:'Times New Roman',Times,serif;font-size:14px;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:40px 0;">
     <tr><td align="center">
-      <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12);border:1px solid #dde1e7;">
+      <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12);border:1px solid #dde1e7;">
         <!-- Header -->
         <tr>
-          <td style="background:#1d3557;padding:28px 36px;border-radius:20px 20px 0 0;">
+          <td style="background:#1d3557;padding:28px 36px;border-radius:24px 24px 0 0;">
             <table width="100%"><tr>
               <td>
                 <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:0.2px;font-family:'Times New Roman',Times,serif;">⚖️ POLYPLASTICS</p>
@@ -874,15 +903,15 @@ function buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, tri
             </tr></table>
           </td>
         </tr>
-        <!-- Divider accent -->
-        <tr><td style="height:4px;background:linear-gradient(90deg,#457b9d,#a8dadc);"></td></tr>
+        <!-- Status accent bar -->
+        <tr><td style="height:5px;background:linear-gradient(90deg,${accentLeft},${accentRight});"></td></tr>
         <!-- Body -->
         <tr>
           <td style="padding:32px 36px;background:#ffffff;">
             <p style="margin:0 0 8px;font-size:16px;font-weight:700;color:#1d3557;font-family:'Times New Roman',Times,serif;">${greeting}</p>
             <p style="margin:0 0 24px;font-size:14px;color:#4a4a6a;line-height:1.9;font-family:'Times New Roman',Times,serif;">${openingLine}</p>
             <!-- Detail block -->
-            <div style="background:#f7f9fc;border:1px solid #dde1e7;border-left:4px solid #457b9d;border-radius:16px;padding:20px 24px;margin-bottom:24px;">
+            <div style="background:#f7f9fc;border:1px solid #dde1e7;border-left:5px solid ${accentLeft};border-radius:18px;padding:20px 24px;margin-bottom:24px;">
               <p style="margin:0 0 14px;font-size:12px;font-weight:700;color:#457b9d;letter-spacing:1.6px;text-transform:uppercase;font-family:'Times New Roman',Times,serif;">${sectionTitle}</p>
               <table width="100%" cellpadding="0" cellspacing="0">${rowsHtml}</table>
             </div>
@@ -896,7 +925,7 @@ function buildComplianceHtml({ subject, greeting, openingLine, sectionTitle, tri
         </tr>
         <!-- Footer -->
         <tr>
-          <td style="background:#f7f9fc;padding:16px 36px;border-top:1px solid #dde1e7;border-radius:0 0 20px 20px;">
+          <td style="background:#f7f9fc;padding:16px 36px;border-top:1px solid #dde1e7;border-radius:0 0 24px 24px;">
             <p style="margin:0;font-size:13px;color:#6b7280;font-family:'Times New Roman',Times,serif;">Sent on ${sentDate} &nbsp;·&nbsp; POLYPLASTICS Compliance System</p>
           </td>
         </tr>
