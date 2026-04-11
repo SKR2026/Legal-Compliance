@@ -2369,7 +2369,10 @@ function AdminSettings({ dk }) {
       defaultReminder: 'Weekly',
       overdueAlert: true,
       autoEscalate: true,
-      escalateDays: 7,
+      escalateDays: 7,        // legacy — kept for migration only
+      escalateDaysL1: 3,      // Level 1 – Plant Head: days after due date
+      escalateDaysL2: 7,      // Level 2 – Regional Manager
+      escalateDaysL3: 14,     // Level 3 – Top Management
       smtpHost: 'smtp.office365.com',
       smtpPort: '587',
       fromEmail: '',
@@ -2414,6 +2417,13 @@ function AdminSettings({ dk }) {
           parsed.escalationEmailsMap[1] = parsed.escalationEmailsMap[1] || [];
           parsed.escalationEmailsMap[2] = parsed.escalationEmailsMap[2] || [];
           parsed.escalationEmailsMap[3] = parsed.escalationEmailsMap[3] || [];
+        }
+        // Migrate legacy single escalateDays → per-level days
+        if (parsed.escalateDays !== undefined && parsed.escalateDaysL1 === undefined) {
+          const legacyDays = Number(parsed.escalateDays) || 7;
+          parsed.escalateDaysL1 = legacyDays;
+          parsed.escalateDaysL2 = legacyDays;
+          parsed.escalateDaysL3 = legacyDays;
         }
         return { ...defaults, ...parsed, toast: false };
       }
@@ -2576,10 +2586,31 @@ function AdminSettings({ dk }) {
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.autoEscalate?'left-6':'left-0.5'}`} />
             </button>
           </div>
-          <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700">
-            <div><p className="text-sm font-medium">Overdue threshold (days)</p><p className={`text-xs ${sub}`}>Days after due date to escalate</p></div>
-            <input type="number" value={settings.escalateDays} onChange={e=>set('escalateDays',e.target.value)} min={1} max={30}
-              className={`${inputCls} w-24 text-center`} />
+          <div className={`p-3 rounded-xl bg-gray-50 dark:bg-gray-700 space-y-3`}>
+            <div>
+              <p className="text-sm font-medium">Overdue threshold — days per escalation level</p>
+              <p className={`text-xs ${sub}`}>Days after due date before each level is triggered</p>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { key:'escalateDaysL1', label:'L1 – Plant Head',     color:'#6366f1' },
+                { key:'escalateDaysL2', label:'L2 – Regional Mgr',   color:'#f97316' },
+                { key:'escalateDaysL3', label:'L3 – Top Management', color:'#ef4444' },
+              ].map(({ key, label, color }) => (
+                <div key={key} className="flex flex-col gap-1 items-center">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full text-white text-center w-full truncate"
+                    style={{ background: color, fontSize:'10px' }}>{label}</span>
+                  <div className="flex items-center gap-1 w-full">
+                    <input type="number" value={settings[key]} onChange={e=>set(key, Math.max(1,+e.target.value))}
+                      min={1} max={90} className={`${inputCls} text-center flex-1`} />
+                    <span className={`text-xs ${sub} whitespace-nowrap`}>days</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className={`text-xs ${sub}`}>
+              💡 Typical: L1 triggers first (e.g. 3 days), L2 after longer overdue (e.g. 7 days), L3 for critical escalation (e.g. 14 days).
+            </p>
           </div>
           <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-700">
             <div><p className="text-sm font-medium">Overdue alerts to admin</p><p className={`text-xs ${sub}`}>Daily digest of overdue items</p></div>
