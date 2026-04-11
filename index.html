@@ -169,6 +169,7 @@ const mkRequirements = (plants, users) => {
         reminderFrequency: REM_FREQS[ti % 4],
         escalationLevel: (ti % 3) + 1,
         escalationEmail: 'ceo@legalcomp.com',
+        escalationEmails: { 1:['planthead@legalcomp.com'], 2:['regional@legalcomp.com'], 3:['ceo@legalcomp.com'] },
         applicableRule: APPLICABLE_RULES[ti % APPLICABLE_RULES.length],
         legalClause: LEGAL_CLAUSES[ti % LEGAL_CLAUSES.length],
         createdAt: new Date(Date.now() - ti * 7 * 86400000).toISOString(),
@@ -1051,18 +1052,30 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
     let baseRows = [];
     let extrasByRecipient = {};
 
-    const reqRows = () => [
-      ['📋','Title',        req?.title],
-      ['🏷️','Category',    req?.category],
-      ['⚡','Priority',     req?.priority],
-      ['⏳','Status',       req?.status],
-      ['📅','Due Date',     fmtDate(req?.dueDate)],
-      ['✅','Completion Date', req?.completionDate ? fmtDate(req.completionDate) : null],
-      ['⌛','Days Left',    req?.dueDate ? `${calcDays(req.dueDate)} days` : null],
-      ['🔔','Reminder',     req?.reminderFrequency],
-      ['🏭','Plant',        plant ? `${plant.name} (${plant.state})` : null],
-      ['⬆️','Escalation',   req?.escalationLevel ? `Level ${req.escalationLevel}` : null],
-    ];
+    const reqRows = () => {
+      const escEmails = req?.escalationEmails && typeof req.escalationEmails === 'object'
+        ? req.escalationEmails
+        : (req?.escalationEmail ? { 1:[req.escalationEmail], 2:[], 3:[] } : {});
+      const currentLevel = req?.escalationLevel || 1;
+      const escEmailList = [];
+      for (let lv = 1; lv <= 3; lv++) {
+        const emails = escEmails[lv] || [];
+        if (emails.length) escEmailList.push(`L${lv}: ${emails.join(', ')}`);
+      }
+      return [
+        ['📋','Title',        req?.title],
+        ['🏷️','Category',    req?.category],
+        ['⚡','Priority',     req?.priority],
+        ['⏳','Status',       req?.status],
+        ['📅','Due Date',     fmtDate(req?.dueDate)],
+        ['✅','Completion Date', req?.completionDate ? fmtDate(req.completionDate) : null],
+        ['⌛','Days Left',    req?.dueDate ? `${calcDays(req.dueDate)} days` : null],
+        ['🔔','Reminder',     req?.reminderFrequency],
+        ['🏭','Plant',        plant ? `${plant.name} (${plant.state})` : null],
+        ['⬆️','Escalation',   req?.escalationLevel ? `Level ${req.escalationLevel}` : null],
+        ['📧','Escalation Emails', escEmailList.length ? escEmailList.join(' | ') : null],
+      ];
+    };
 
     if (trigger === 'new_requirement') {
       subject       = `[LegalComp] New Requirement Added: ${req?.title}`;
@@ -1163,6 +1176,23 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
     const recipients = new Set([cfg.msToEmail]);
     if (assignee?.email) recipients.add(assignee.email);
     if (oldAssignee?.email && trigger === 'reassignment') recipients.add(oldAssignee.email);
+    // ── Add per-level escalation emails ──────────────────────────────────
+    if (req) {
+      // Per-requirement emails take precedence; fall back to global adminSettings map
+      const perReqEmails = req.escalationEmails && typeof req.escalationEmails === 'object'
+        ? req.escalationEmails
+        : (req.escalationEmail ? { 1:[req.escalationEmail], 2:[], 3:[] } : null);
+      const globalMap = cfg.escalationEmailsMap && typeof cfg.escalationEmailsMap === 'object'
+        ? cfg.escalationEmailsMap
+        : { 1: cfg.escalation1?[cfg.escalation1]:[], 2: cfg.escalation2?[cfg.escalation2]:[], 3: cfg.escalation3?[cfg.escalation3]:[] };
+      const escEmails = perReqEmails || globalMap;
+      const currentLevel = req.escalationLevel || 1;
+      // Send to all levels up to and including current escalation level
+      for (let lv = 1; lv <= currentLevel; lv++) {
+        const lvEmails = escEmails[lv] || [];
+        lvEmails.forEach(e => { if(e) recipients.add(e); });
+      }
+    }
 
     // ── Fire one send per recipient ─────────────────────────────────────
     for (const toEmail of recipients) {
@@ -1245,15 +1275,105 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
 }
 
 /* ═══════════════════════════════════════════
+   ESCALATION LEVEL PANEL (reusable)
+   – one panel per level; own draft-email state
+═══════════════════════════════════════════ */
+const ESC_LEVEL_COLORS = { 1:'#22c55e', 2:'#f59e0b', 3:'#ef4444' };
+const ESC_LEVEL_LABELS = { 1:'Level 1 – Plant Head', 2:'Level 2 – Regional Manager', 3:'Level 3 – Top Management' };
+
+function EscalationLevelPanel({ level, allEmails, onUpdate, dk }) {
+  const [draft, setDraft] = useState('');
+  const [err, setErr]     = useState('');
+  const emails  = (allEmails && allEmails[level]) ? allEmails[level] : [];
+  const color   = ESC_LEVEL_COLORS[level];
+  const label   = ESC_LEVEL_LABELS[level];
+  const roleLabel = label.split('–')[1]?.trim() || 'escalation';
+
+  const addEmail = () => {
+    const trimmed = draft.trim().toLowerCase();
+    if (!trimmed) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { setErr('Invalid email address'); return; }
+    if (emails.includes(trimmed)) { setErr('Email already added'); return; }
+    onUpdate({ ...allEmails, [level]: [...emails, trimmed] });
+    setDraft(''); setErr('');
+  };
+
+  const removeEmail = (email) => {
+    onUpdate({ ...allEmails, [level]: emails.filter(e => e !== email) });
+  };
+
+  return (
+    <div className="sm:col-span-2">
+      <div className={`rounded-xl border p-3 transition-all ${dk ? 'bg-gray-800 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
+        style={{ borderLeftWidth: '3px', borderLeftColor: color }}>
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+            style={{ background: color }}>{level}</span>
+          <span className="text-xs font-semibold" style={{ color }}>{label}</span>
+          {emails.length > 0 && (
+            <span className="ml-auto text-xs px-1.5 py-0.5 rounded-full font-medium"
+              style={{ background: color + '22', color }}>
+              {emails.length} recipient{emails.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        {/* Email tags */}
+        {emails.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {emails.map(email => (
+              <span key={email}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${dk ? 'bg-gray-700 border-gray-500 text-gray-200' : 'bg-white border-gray-300 text-gray-700'}`}>
+                ✉️ {email}
+                <button type="button" onClick={() => removeEmail(email)}
+                  className="ml-0.5 text-gray-400 hover:text-red-500 transition-colors font-bold leading-none text-sm">×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Add row */}
+        <div className="flex gap-2">
+          <input
+            type="email"
+            value={draft}
+            onChange={e => { setDraft(e.target.value); setErr(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
+            placeholder={`Add ${roleLabel} email…`}
+            className={`flex-1 px-3 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-2 transition
+              ${err ? 'border-red-400 focus:ring-red-300' : 'border-gray-200 focus:ring-purple-400 dark:border-gray-600'}
+              ${dk ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white text-gray-900 placeholder-gray-400'}`}
+          />
+          <button type="button" onClick={addEmail}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors flex-shrink-0 hover:opacity-90"
+            style={{ background: color }}>
+            + Add
+          </button>
+        </div>
+        {err && <p className="text-xs text-red-500 mt-1">{err}</p>}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    REQUIREMENT MODAL (Add / Edit)
 ═══════════════════════════════════════════ */
 function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, categories: catsProp }) {
   const cats = catsProp || CATEGORIES;
-  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', plantIds:[], assignedTo:[], status:'Pending', dueDate:'', completionDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'', applicableRule:'', legalClause:'' };
+  const blank = { title:'', description:'', category: (catsProp||CATEGORIES)[0]||'', priority:'High', plantId:'', plantIds:[], assignedTo:[], status:'Pending', dueDate:'', completionDate:'', reminderFrequency:'Weekly', escalationLevel:1, escalationEmail:'', escalationEmails:{ 1:[], 2:[], 3:[] }, applicableRule:'', legalClause:'' };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   useEffect(()=>{
-    const init = initial ? { ...initial, assignedTo: Array.isArray(initial.assignedTo) ? initial.assignedTo : (initial.assignedTo ? [initial.assignedTo] : []) } : blank;
+    const init = initial ? {
+      ...initial,
+      assignedTo: Array.isArray(initial.assignedTo) ? initial.assignedTo : (initial.assignedTo ? [initial.assignedTo] : []),
+      // Normalise legacy single escalationEmail → escalationEmails map
+      escalationEmails: initial.escalationEmails && typeof initial.escalationEmails === 'object'
+        ? { 1: initial.escalationEmails[1]||[], 2: initial.escalationEmails[2]||[], 3: initial.escalationEmails[3]||[] }
+        : (initial.escalationEmail
+            ? { 1:[initial.escalationEmail], 2:[], 3:[] }
+            : { 1:[], 2:[], 3:[] })
+    } : blank;
     setForm(init);
   }, [open]);
 
@@ -1373,11 +1493,23 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, c
             {ESC_LABELS.map((l,i)=><option key={i} value={i+1}>{l}</option>)}
           </select>
         </FormField>
+        {/* ── Escalation Email Notifications (per level) ── */}
         <div className="sm:col-span-2">
-          <FormField label="Escalation Email (Top Management)">
-            <input type="email" value={form.escalationEmail} onChange={e=>set('escalationEmail',e.target.value)} placeholder="ceo@company.com" className={inputCls} />
-          </FormField>
+          <div className="flex items-center gap-2 my-1">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+            <span className="text-xs font-bold uppercase tracking-widest text-purple-500 px-2">📧 Escalation Email Notifications</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
+          </div>
         </div>
+        {[1,2,3].map(level => (
+          <EscalationLevelPanel
+            key={level}
+            level={level}
+            allEmails={form.escalationEmails || {1:[],2:[],3:[]}}
+            onUpdate={updated => set('escalationEmails', updated)}
+            dk={dk}
+          />
+        ))}
 
         {/* ── Legal & Regulatory Section ── */}
         <div className="sm:col-span-2">
@@ -1595,13 +1727,46 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
               </div>
               <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{viewReq.description}</p>
               <div className="grid grid-cols-2 gap-4">
-                {[['Plant',plant?.name],['State',plant?.state],['Assigned To',assigneeStr],['Due Date',formatDate(viewReq.dueDate)],['Completion Date',viewReq.completionDate?formatDate(viewReq.completionDate):'—'],['Reminder',viewReq.reminderFrequency],['Escalation Email',viewReq.escalationEmail||'—']].map(([l,v])=>(
+                {[['Plant',plant?.name],['State',plant?.state],['Assigned To',assigneeStr],['Due Date',formatDate(viewReq.dueDate)],['Completion Date',viewReq.completionDate?formatDate(viewReq.completionDate):'—'],['Reminder',viewReq.reminderFrequency]].map(([l,v])=>(
                   <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
                     <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${sub}`}>{l}</p>
                     <p className="font-medium text-gray-800 dark:text-white">{v||'—'}</p>
                   </div>
                 ))}
               </div>
+
+              {/* ── Escalation Email Notifications ── */}
+              {(() => {
+                const escEmails = viewReq.escalationEmails && typeof viewReq.escalationEmails === 'object'
+                  ? viewReq.escalationEmails
+                  : (viewReq.escalationEmail ? { 1:[viewReq.escalationEmail], 2:[], 3:[] } : { 1:[], 2:[], 3:[] });
+                const hasAny = [1,2,3].some(l => (escEmails[l]||[]).length > 0);
+                const levelColors = { 1:'#22c55e', 2:'#f59e0b', 3:'#ef4444' };
+                const levelLabels = { 1:'Level 1 – Plant Head', 2:'Level 2 – Regional Manager', 3:'Level 3 – Top Management' };
+                if (!hasAny) return null;
+                return (
+                  <div className={`rounded-xl border p-4 space-y-3 ${dk?'bg-purple-900/20 border-purple-700/40':'bg-purple-50 border-purple-200'}`}>
+                    <p className="text-xs font-bold uppercase tracking-widest text-purple-500 flex items-center gap-1.5">📧 Escalation Email Notifications</p>
+                    {[1,2,3].map(level => {
+                      const emails = escEmails[level] || [];
+                      if (!emails.length) return null;
+                      return (
+                        <div key={level}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="w-4 h-4 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{background:levelColors[level]}}>{level}</span>
+                            <p className="text-xs font-semibold" style={{color:levelColors[level]}}>{levelLabels[level]}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {emails.map(e=>(
+                              <span key={e} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${dk?'bg-gray-700 border-gray-600 text-gray-200':'bg-white border-gray-300 text-gray-700'}`}>✉️ {e}</span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* ── Legal & Regulatory Section ── */}
               {(viewReq.applicableRule || viewReq.legalClause) && (
@@ -2195,6 +2360,12 @@ function AdminSettings({ dk }) {
       escalation1: 'planthead@legalcomp.com',
       escalation2: 'regional@legalcomp.com',
       escalation3: 'ceo@legalcomp.com',
+      // New: multi-email per level (supersedes escalation1/2/3)
+      escalationEmailsMap: {
+        1: ['planthead@legalcomp.com'],
+        2: ['regional@legalcomp.com'],
+        3: ['ceo@legalcomp.com'],
+      },
       defaultReminder: 'Weekly',
       overdueAlert: true,
       autoEscalate: true,
@@ -2231,6 +2402,19 @@ function AdminSettings({ dk }) {
       const raw = localStorage.getItem('adminSettings');
       if (raw) {
         const parsed = JSON.parse(raw);
+        // Migrate legacy single-email fields → escalationEmailsMap
+        if (!parsed.escalationEmailsMap) {
+          parsed.escalationEmailsMap = {
+            1: parsed.escalation1 ? [parsed.escalation1] : [],
+            2: parsed.escalation2 ? [parsed.escalation2] : [],
+            3: parsed.escalation3 ? [parsed.escalation3] : [],
+          };
+        } else {
+          // Ensure all three levels exist
+          parsed.escalationEmailsMap[1] = parsed.escalationEmailsMap[1] || [];
+          parsed.escalationEmailsMap[2] = parsed.escalationEmailsMap[2] || [];
+          parsed.escalationEmailsMap[3] = parsed.escalationEmailsMap[3] || [];
+        }
         return { ...defaults, ...parsed, toast: false };
       }
     } catch(_) {}
@@ -2354,19 +2538,23 @@ function AdminSettings({ dk }) {
       )}
 
       <div className={card}>
-        <h3 className="font-semibold mb-4 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
+        <h3 className="font-semibold mb-1 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
           <span>📧</span> Escalation Email Configuration
         </h3>
-        <div className="space-y-4">
-          {[['Level 1 – Plant Head','escalation1'],['Level 2 – Regional Manager','escalation2'],['Level 3 – Top Management / CEO','escalation3']].map(([label,key])=>(
-            <div key={key} className="flex items-center gap-4">
-              <div className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 w-52 ${key==='escalation3'?'bg-red-100 text-red-700':key==='escalation2'?'bg-amber-100 text-amber-700':'bg-blue-100 text-blue-700'}`}>{label}</div>
-              <input value={settings[key]} onChange={e=>set(key,e.target.value)} type="email" placeholder="email@company.com" className={inputCls} />
-            </div>
+        <p className={`text-xs mb-4 ${sub}`}>Add one or more recipient emails per escalation level. Notifications are sent to all levels up to the requirement's current escalation level.</p>
+        <div className="space-y-3">
+          {[1,2,3].map(level => (
+            <EscalationLevelPanel
+              key={level}
+              level={level}
+              allEmails={settings.escalationEmailsMap || {1:[],2:[],3:[]}}
+              onUpdate={updated => set('escalationEmailsMap', updated)}
+              dk={dk}
+            />
           ))}
         </div>
         <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-400">
-          ⚡ Escalation emails are triggered automatically when a task becomes overdue beyond the threshold.
+          ⚡ These are the <strong>global default</strong> escalation recipients. You can also configure per-requirement emails in the <em>Add / Edit Requirement</em> form — those take precedence.
         </div>
       </div>
 
