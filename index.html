@@ -37,12 +37,12 @@
              document.head.appendChild(s);"></script>
 
   <!-- Firebase SDK (compat build) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics-compat.js"></script>
 
-  <!-- Firebase Initialization -->
+  <!-- Firebase Initialization — exact same pattern as Plant Visit app -->
   <script>
     const FIREBASE_CONFIG = {
       apiKey:            "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
@@ -56,28 +56,17 @@
     if (!firebase.apps.length) {
       firebase.initializeApp(FIREBASE_CONFIG);
     }
-    // Expose Firestore globally so React components can use it
-    window.db = firebase.firestore();
+    window.db     = firebase.firestore();
     window.fbAuth = firebase.auth();
-    console.log("✅ Firebase initialized — project: skr-task");
-    const _azureRedirectUri = window.location.href.split('?')[0].split('#')[0];
-    console.info(`ℹ️  Azure AD Redirect URI to register: ${_azureRedirectUri}`);
 
-    // Sign in anonymously so request.auth != null satisfies Firestore security rules.
-    // React app mounts only after auth resolves (or fails) to avoid permission errors.
-    window._fbAuthReady = new Promise((resolve) => {
-      firebase.auth().onAuthStateChanged(user => {
-        if (user) { console.log('✅ Firebase Auth ready, uid:', user.uid); resolve(user); }
-      });
-      firebase.auth().signInAnonymously()
-        .then(() => console.log('✅ signInAnonymously OK'))
-        .catch(err => {
-          console.error('❌ signInAnonymously failed:', err.code, err.message);
-          resolve(null); // resolve anyway so app still loads from localStorage
-        });
-      // Safety net: mount after 5s even if auth hangs
-      setTimeout(() => resolve(null), 5000);
-    });
+    // Sign in anonymously to satisfy Firestore auth rules, then mount React
+    // Exact same pattern as Plant Visit app:
+    //   firebase.auth().signInAnonymously()
+    //     .then(() => initFirestoreListeners())
+    //     .catch(err => { console.error(...); initFirestoreListeners(); });
+    window._fbAuthReady = firebase.auth().signInAnonymously()
+      .then(() => { console.log("✅ Firebase anonymous auth OK — project: skr-task"); })
+      .catch(err => { console.error("❌ Firebase anonymous auth failed:", err.code, err.message); });
   </script>
 
   <style>
@@ -4282,8 +4271,9 @@ function App() {
   return <UserDashboard {...ctx} />;
 }
 
-// Wait for Firebase Auth before mounting React — prevents Firestore permission errors
-window._fbAuthReady.then(() => {
+// Mount React only after anonymous auth resolves — same pattern as Plant Visit app
+// Mount React after anonymous auth resolves — same pattern as Plant Visit app
+window._fbAuthReady.finally(() => {
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(<App />);
 });
