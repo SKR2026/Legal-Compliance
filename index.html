@@ -37,12 +37,12 @@
              document.head.appendChild(s);"></script>
 
   <!-- Firebase SDK (compat build) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
 
-  <!-- Firebase Initialization — exact same pattern as Plant Visit app -->
+  <!-- Firebase Initialization -->
   <script>
     const FIREBASE_CONFIG = {
       apiKey:            "AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8",
@@ -56,17 +56,14 @@
     if (!firebase.apps.length) {
       firebase.initializeApp(FIREBASE_CONFIG);
     }
-    window.db     = firebase.firestore();
+    // Expose Firestore globally so React components can use it
+    window.db = firebase.firestore();
     window.fbAuth = firebase.auth();
-
-    // Sign in anonymously to satisfy Firestore auth rules, then mount React
-    // Exact same pattern as Plant Visit app:
-    //   firebase.auth().signInAnonymously()
-    //     .then(() => initFirestoreListeners())
-    //     .catch(err => { console.error(...); initFirestoreListeners(); });
-    window._fbAuthReady = firebase.auth().signInAnonymously()
-      .then(() => { console.log("✅ Firebase anonymous auth OK — project: skr-task"); })
-      .catch(err => { console.error("❌ Firebase anonymous auth failed:", err.code, err.message); });
+    console.log("✅ Firebase initialized — project: skr-task");
+    // Help: print the exact redirect URI that must be registered in Azure AD
+    // App registrations → Authentication → Single-page application → Redirect URIs
+    const _azureRedirectUri = window.location.href.split('?')[0].split('#')[0];
+    console.info(`ℹ️  Azure AD Redirect URI to register: ${_azureRedirectUri}`);
   </script>
 
   <style>
@@ -1026,6 +1023,8 @@ Sent on ${sentDate} · Polyplastics`;
  * emailProvider: 'graph' (Microsoft Graph API) | 'emailjs' | 'both'
  */
 async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, oldStatus, changedBy }) {
+  // Log every notification event for the daily digest
+  logDigestActivity({ trigger, req, plant, assignee, oldStatus, changedBy });
   try {
     const raw = localStorage.getItem('adminSettings');
     if (!raw) return;
@@ -1275,6 +1274,386 @@ async function sendComplianceMail({ trigger, req, plant, assignee, oldAssignee, 
   } catch (e) {
     console.warn('⚠️ sendComplianceMail error:', e?.message || e);
   }
+}
+
+/* ═══════════════════════════════════════════
+   DAILY DIGEST — 24-HOUR CONSOLIDATED EMAIL
+═══════════════════════════════════════════ */
+
+/**
+ * Appends an activity entry to the in-memory digest log (window.__digestLog).
+ * Called from sendComplianceMail so every real notification is captured.
+ */
+function logDigestActivity({ trigger, req, plant, assignee, oldStatus, changedBy }) {
+  if (!window.__digestLog) window.__digestLog = [];
+  window.__digestLog.push({
+    ts: new Date().toISOString(),
+    trigger,
+    title:       req?.title       || '',
+    category:    req?.category    || '',
+    priority:    req?.priority    || '',
+    status:      req?.status      || '',
+    oldStatus:   oldStatus        || '',
+    dueDate:     req?.dueDate     || '',
+    plant:       plant?.name      || '',
+    state:       plant?.state     || '',
+    assignee:    assignee?.name   || '',
+    changedBy:   changedBy?.name  || 'System',
+  });
+}
+
+/**
+ * Sends a single consolidated "last 24 hours" digest email.
+ * Clears the digest log after sending.
+ */
+async function sendDailyDigestMail(requirements, plants, users) {
+  try {
+    const raw = localStorage.getItem('adminSettings');
+    if (!raw) return;
+    const cfg = JSON.parse(raw);
+    if (!cfg.dailyDigestEnabled) return;
+
+    const provider  = cfg.emailProvider || 'graph';
+    const useGraph  = provider === 'graph'  || provider === 'both';
+    const useEjs    = provider === 'emailjs' || provider === 'both';
+    const graphReady = useGraph  && cfg.msClientId && cfg.msTenantId && cfg.msToEmail;
+    const ejsReady   = (useEjs || cfg.ejsEnabled) && cfg.ejsServiceId && cfg.ejsTemplateId && cfg.ejsPublicKey && cfg.msToEmail;
+    if (!graphReady && !ejsReady) { console.warn('⚠️ Daily digest: no email provider configured.'); return; }
+
+    const portalLink = window.location.href.split('?')[0];
+    const sentDate   = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const fmtDate    = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+    const daysLeft   = d => { const diff = Math.ceil((new Date(d) - Date.now()) / 86400000); return diff; };
+
+    // ── Snapshot current state for the digest sections ───────────────────
+    const now        = Date.now();
+    const cutoff     = now - 24 * 60 * 60 * 1000;
+    const overdue    = requirements.filter(r => r.status === 'Overdue');
+    const dueSoon    = requirements.filter(r => r.status !== 'Completed' && r.status !== 'Overdue' && r.dueDate && daysLeft(r.dueDate) >= 0 && daysLeft(r.dueDate) <= 7);
+    const completed24= requirements.filter(r => r.status === 'Completed' && r.completionDate && new Date(r.completionDate).getTime() >= cutoff);
+    const created24  = requirements.filter(r => r.createdAt && new Date(r.createdAt).getTime() >= cutoff);
+    // Activity log captured during the last 24h
+    const actLog     = (window.__digestLog || []).filter(e => new Date(e.ts).getTime() >= cutoff);
+
+    const total      = requirements.length;
+    const completedAll = requirements.filter(r=>r.status==='Completed').length;
+    const compliance = total ? Math.round(completedAll/total*100) : 0;
+
+    const subject = `[LegalComp] Daily Digest — ${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'2-digit',month:'short',year:'numeric'})}`;
+
+    // ── Build rich HTML body ─────────────────────────────────────────────
+    const buildDigestHtml = () => {
+      const brandGreen = '#22c55e'; const brandRed = '#ef4444'; const brandAmber = '#f59e0b';
+      const brandIndigo = '#6366f1'; const brandGray = '#6b7280';
+
+      const statBox = (color, emoji, count, label) =>
+        `<td style="width:25%;text-align:center;padding:12px 6px;">
+           <div style="background:${color}18;border:1px solid ${color}44;border-radius:12px;padding:14px 8px;">
+             <div style="font-size:22px;margin-bottom:4px;">${emoji}</div>
+             <div style="font-size:24px;font-weight:800;color:${color};line-height:1;">${count}</div>
+             <div style="font-size:11px;color:#6b7280;margin-top:3px;font-weight:600;">${label}</div>
+           </div>
+         </td>`;
+
+      const sectionHdr = (emoji, title, color) =>
+        `<tr><td style="padding:22px 0 10px;">
+           <div style="display:flex;align-items:center;gap:8px;border-left:4px solid ${color};padding-left:12px;">
+             <span style="font-size:16px;">${emoji}</span>
+             <span style="font-size:14px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:.05em;">${title}</span>
+           </div>
+         </td></tr>`;
+
+      const emptyRow = (msg) =>
+        `<tr><td style="padding:10px 16px;background:#f9fafb;border-radius:10px;color:#9ca3af;font-size:13px;text-align:center;">${msg}</td></tr>`;
+
+      const priorityColor = p => ({Critical:'#ef4444',High:'#f97316',Medium:'#f59e0b',Low:'#22c55e'}[p]||'#6b7280');
+      const statusColor   = s => ({Completed:'#22c55e','In Progress':'#6366f1',Pending:'#f59e0b',Overdue:'#ef4444'}[s]||'#6b7280');
+      const badge = (text, color) => `<span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:${color}22;color:${color};">${text}</span>`;
+
+      const reqRow = (r) => {
+        const p = plants.find(pl=>pl.id===r.plantId);
+        const dl = daysLeft(r.dueDate);
+        const assignedIds = Array.isArray(r.assignedTo)?r.assignedTo:(r.assignedTo?[r.assignedTo]:[]);
+        const assigneeNames = assignedIds.map(id=>users.find(u=>u.id===id)?.name).filter(Boolean).join(', ') || 'Unassigned';
+        return `<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:500;color:#111827;">${r.title}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#6b7280;">${p?.name||'—'}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;">${badge(r.priority, priorityColor(r.priority))}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;">${badge(r.status, statusColor(r.status))}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;color:${dl<0?'#ef4444':dl<7?'#f59e0b':'#6b7280'};">${fmtDate(r.dueDate)}${dl<0?` <span style="color:#ef4444;font-size:11px;">(${Math.abs(dl)}d overdue)</span>`:dl<7?` <span style="color:#f59e0b;font-size:11px;">(${dl}d left)</span>`:''}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#6b7280;">${assigneeNames}</td>
+        </tr>`;
+      };
+
+      const triggerLabel = t => ({
+        new_requirement:'➕ New Requirement', status_change:'🔄 Status Changed',
+        new_assignment:'👤 Assigned', reassignment:'🔀 Reassigned',
+        plant_added:'🏭 Plant Added', plant_deleted:'🏚️ Plant Deleted', plant_updated:'✏️ Plant Updated'
+      }[t] || t);
+
+      const activityRows = actLog.length
+        ? actLog.map(e => `<tr>
+            <td style="padding:9px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#9ca3af;">${new Date(e.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;font-weight:600;">${triggerLabel(e.trigger)}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#111827;">${e.title||'—'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#6b7280;">${e.plant||'—'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #f1f5f9;">${e.status ? badge(e.status, statusColor(e.status)) : '—'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#6b7280;">${e.changedBy||'System'}</td>
+          </tr>`).join('')
+        : `<tr><td colspan="6" style="padding:14px;text-align:center;color:#9ca3af;font-size:13px;">No activity recorded in the last 24 hours.</td></tr>`;
+
+      return `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head><body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px;">
+  <tr><td align="center">
+    <table width="680" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <tr><td style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#4338ca 100%);padding:32px 36px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td>
+              <div style="font-size:13px;font-weight:700;color:#a5b4fc;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;">POLYPLASTICS — LEGALCOMP</div>
+              <div style="font-size:26px;font-weight:800;color:#ffffff;line-height:1.2;">Daily Compliance Digest</div>
+              <div style="font-size:13px;color:#c7d2fe;margin-top:6px;">📅 Last 24-Hour Summary · ${sentDate}</div>
+            </td>
+            <td align="right" style="vertical-align:top;">
+              <div style="background:rgba(255,255,255,0.12);border-radius:14px;padding:12px 18px;text-align:center;">
+                <div style="font-size:28px;font-weight:800;color:#ffffff;">${compliance}%</div>
+                <div style="font-size:11px;color:#c7d2fe;font-weight:600;margin-top:2px;">COMPLIANCE</div>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+
+      <!-- Summary Stats -->
+      <tr><td style="padding:24px 28px 10px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            ${statBox(brandGray,   '📋', total,             'Total')}
+            ${statBox(brandGreen,  '✅', completedAll,      'Completed')}
+            ${statBox(brandRed,    '🚨', overdue.length,    'Overdue')}
+            ${statBox(brandAmber,  '⏰', dueSoon.length,    'Due in 7d')}
+          </tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:4px 28px 8px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            ${statBox('#6366f1', '🆕', created24.length,   'Added Today')}
+            ${statBox('#22c55e', '🏁', completed24.length, 'Closed Today')}
+            ${statBox('#f59e0b', '⚡', actLog.length,      'Activities')}
+            ${statBox('#06b6d4', '🏭', plants.length,      'Plants')}
+          </tr>
+        </table>
+      </td></tr>
+
+      <tr><td style="padding:0 28px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+
+        <!-- Overdue Section -->
+        ${sectionHdr('🚨','Overdue Requirements','#ef4444')}
+        ${overdue.length ? `
+        <tr><td>
+          <div style="overflow-x:auto;border-radius:12px;border:1px solid #fee2e2;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead><tr style="background:#fef2f2;">
+              <th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">Requirement</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Plant</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Priority</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Status</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Due Date</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Assignee</th>
+            </tr></thead>
+            <tbody>${overdue.slice(0,10).map(reqRow).join('')}</tbody>
+          </table></div>
+          ${overdue.length>10?`<p style="font-size:12px;color:#9ca3af;margin:8px 0 0;text-align:right;">+${overdue.length-10} more overdue items — see portal for full list.</p>`:''}
+        </td></tr>` : emptyRow('🎉 No overdue requirements!')}
+
+        <!-- Due Soon Section -->
+        ${sectionHdr('⏰','Due Within 7 Days','#f59e0b')}
+        ${dueSoon.length ? `
+        <tr><td>
+          <div style="overflow-x:auto;border-radius:12px;border:1px solid #fef3c7;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead><tr style="background:#fffbeb;">
+              <th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Requirement</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Plant</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Priority</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Status</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Due Date</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Assignee</th>
+            </tr></thead>
+            <tbody>${dueSoon.slice(0,10).map(reqRow).join('')}</tbody>
+          </table></div>
+          ${dueSoon.length>10?`<p style="font-size:12px;color:#9ca3af;margin:8px 0 0;text-align:right;">+${dueSoon.length-10} more — see portal for full list.</p>`:''}
+        </td></tr>` : emptyRow('✅ Nothing due within the next 7 days.')}
+
+        <!-- Activity Log -->
+        ${sectionHdr('📜','Last 24-Hour Activity Log','#6366f1')}
+        <tr><td>
+          <div style="overflow-x:auto;border-radius:12px;border:1px solid #e0e7ff;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead><tr style="background:#eef2ff;">
+              <th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Time</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Event</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Requirement</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Plant</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Status</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">By</th>
+            </tr></thead>
+            <tbody>${activityRows}</tbody>
+          </table></div>
+        </td></tr>
+
+        <!-- Recently Closed -->
+        ${completed24.length ? `
+        ${sectionHdr('🏁','Completed in Last 24 Hours','#22c55e')}
+        <tr><td>
+          <div style="overflow-x:auto;border-radius:12px;border:1px solid #dcfce7;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead><tr style="background:#f0fdf4;">
+              <th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Requirement</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Plant</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Priority</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Status</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Closed On</th>
+              <th style="text-align:left;padding:10px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;">Assignee</th>
+            </tr></thead>
+            <tbody>${completed24.slice(0,10).map(reqRow).join('')}</tbody>
+          </table></div>
+        </td></tr>` : ''}
+
+      </table>
+      </td></tr>
+
+      <!-- CTA Footer -->
+      <tr><td style="padding:20px 28px 8px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td align="center">
+            <a href="${portalLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;font-weight:700;font-size:14px;padding:14px 32px;border-radius:12px;text-decoration:none;letter-spacing:.02em;">
+              📊 Open Compliance Portal →
+            </a>
+          </td></tr>
+        </table>
+      </td></tr>
+
+      <!-- Footer -->
+      <tr><td style="background:#f8fafc;padding:20px 36px;border-top:1px solid #e5e7eb;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="font-size:11px;color:#9ca3af;">
+              <strong style="color:#6b7280;">Polyplastics — LegalComp</strong><br/>
+              Automated daily digest · ${sentDate}<br/>
+              <span style="font-size:10px;">This is an auto-generated report. Do not reply to this email.</span>
+            </td>
+            <td align="right">
+              <div style="font-size:11px;color:#9ca3af;">Compliance Rate<br/>
+                <span style="font-size:20px;font-weight:800;color:#6366f1;">${compliance}%</span>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+    };
+
+    // ── Acquire Graph token ───────────────────────────────────────────────
+    let accessToken = null;
+    if (graphReady) {
+      try { accessToken = await getMSGraphToken(cfg); }
+      catch(e) { console.warn('⚠️ Daily digest: MS Graph token failed:', e?.message||e); }
+    }
+
+    const toEmail   = cfg.msToEmail;
+    const htmlBody  = buildDigestHtml();
+    const plainText = `LEGALCOMP DAILY DIGEST – ${sentDate}\n\nCompliance: ${compliance}% (${completedAll}/${total})\nOverdue: ${overdue.length} | Due in 7d: ${dueSoon.length} | Added today: ${created24.length}\n\nActivity (last 24h): ${actLog.length} events\n\nOpen portal: ${portalLink}`;
+
+    if (graphReady && accessToken) {
+      try {
+        await sendGraphMail(accessToken, { toEmail, subject, htmlBody });
+        console.log('✅ [MS Graph] Daily digest sent →', toEmail);
+      } catch(e) { console.warn('⚠️ Daily digest Graph send error:', e?.message||e); }
+    }
+
+    if (ejsReady) {
+      try {
+        await sendEmailJsMail(cfg, {
+          toEmail, subject, plainText,
+          templateParams: {
+            to_name:        'Compliance Team',
+            from_name:      'Polyplastics',
+            trigger_label:  'Daily Digest',
+            opening_line:   `Your consolidated 24-hour compliance summary for ${sentDate}.`,
+            closing_remark: 'Please review overdue and upcoming items in the compliance portal.',
+            portal_link:    portalLink,
+            sent_date:      sentDate,
+            req_title:      `${overdue.length} overdue / ${total} total`,
+            req_status:     `${compliance}% compliance`,
+            req_priority:   '',
+            req_category:   '',
+            req_due_date:   '',
+            req_description:plainText,
+            plant_name:     `${plants.length} plants`,
+            plant_state:    '',
+            assignee_name:  '',
+            assignee_email: '',
+            changed_by:     'System',
+            old_status:     '',
+          },
+        });
+        console.log('✅ [EmailJS] Daily digest sent →', toEmail);
+      } catch(e) { console.warn('⚠️ Daily digest EmailJS send error:', e?.message||e); }
+    }
+
+    // ── Clear the activity log after successful dispatch ─────────────────
+    window.__digestLog = [];
+    localStorage.setItem('lastDailyDigestSent', new Date().toISOString());
+    console.log('📬 Daily digest dispatched and log cleared.');
+
+  } catch(e) {
+    console.warn('⚠️ sendDailyDigestMail error:', e?.message||e);
+  }
+}
+
+/**
+ * useDailyDigestScheduler – React hook.
+ * Checks every minute if the configured digest time has arrived and fires.
+ * Must be called with live requirements/plants/users from App state.
+ */
+function useDailyDigestScheduler(requirements, plants, users) {
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        const raw = localStorage.getItem('adminSettings');
+        if (!raw) return;
+        const cfg = JSON.parse(raw);
+        if (!cfg.dailyDigestEnabled) return;
+
+        const digestTime = cfg.dailyDigestTime || '08:00'; // HH:mm
+        const [hh, mm]   = digestTime.split(':').map(Number);
+        const now        = new Date();
+        const todayKey   = now.toISOString().slice(0,10); // YYYY-MM-DD
+        const lastSent   = localStorage.getItem('lastDailyDigestSent') || '';
+        const lastSentDay= lastSent.slice(0,10);
+
+        // Fire if the current time is at or just past the configured time and we haven't sent today
+        if (now.getHours() === hh && now.getMinutes() === mm && lastSentDay !== todayKey) {
+          await sendDailyDigestMail(requirements, plants, users);
+        }
+      } catch(e) {
+        console.warn('⚠️ Digest scheduler tick error:', e?.message||e);
+      }
+    };
+
+    tick(); // run once on mount
+    const id = setInterval(tick, 60000); // check every minute
+    return () => clearInterval(id);
+  }, [requirements, plants, users]);
 }
 
 /* ═══════════════════════════════════════════
@@ -2403,6 +2782,9 @@ function AdminSettings({ dk }) {
       fbAppId: '1:1011690659933:web:f57e43ee0267a475682db4',
       fbMeasurementId: 'G-67NGHMK0QR',
       fbEnabled: true,
+      // Daily Digest
+      dailyDigestEnabled: false,
+      dailyDigestTime: '08:00',
     };
     try {
       const raw = localStorage.getItem('adminSettings');
@@ -2440,6 +2822,8 @@ function AdminSettings({ dk }) {
   const [ejsShowPass,     setEjsShowPass]     = useState(false);
   const [ejsTestStatus,   setEjsTestStatus]   = useState(null); // null | 'sending' | 'success' | 'error'
   const [ejsTestMsg,      setEjsTestMsg]      = useState('');
+  const [digestToast,     setDigestToast]     = useState(null);
+  const showToast = (msg, type='success') => { setDigestToast({msg,type}); setTimeout(()=>setDigestToast(null),4000); };
 
   const set = (k,v) => setSettings(s=>({...s,[k]:v}));
 
@@ -2549,6 +2933,11 @@ function AdminSettings({ dk }) {
       {settings.toast && (
         <div className="fixed top-6 right-6 z-50 bg-green-500 text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium">✅ Settings saved successfully!</div>
       )}
+      {digestToast && (
+        <div className={`fixed top-6 right-6 z-[99] px-5 py-3 rounded-xl shadow-xl text-sm font-semibold flex items-center gap-2 transition-all ${digestToast.type==='error'?'bg-red-500 text-white':'bg-indigo-600 text-white'}`}>
+          {digestToast.type==='error'?'❌':'📬'} {digestToast.msg}
+        </div>
+      )}
 
       <div className={card}>
         <h3 className="font-semibold mb-1 flex items-center gap-2" style={{fontFamily:"'Outfit',sans-serif"}}>
@@ -2621,6 +3010,115 @@ function AdminSettings({ dk }) {
               className={`w-12 h-6 rounded-full transition-colors relative ${settings.overdueAlert?'bg-indigo-600':'bg-gray-300'}`}>
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.overdueAlert?'left-6':'left-0.5'}`} />
             </button>
+          </div>
+
+          {/* ── Daily Digest Scheduler ── */}
+          <div className={`rounded-xl border-2 overflow-hidden transition-colors ${settings.dailyDigestEnabled ? (dk?'border-indigo-700':'border-indigo-300') : (dk?'border-gray-600':'border-gray-200')}`}>
+            {/* Header row */}
+            <div className={`flex items-center justify-between px-4 py-3 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+              <div className="flex items-center gap-2.5">
+                <span className="text-lg">📬</span>
+                <div>
+                  <p className="text-sm font-semibold">Consolidated Daily Digest Email</p>
+                  <p className={`text-xs ${sub}`}>One email summarising all last-24h activity, overdue items &amp; compliance stats</p>
+                </div>
+              </div>
+              <button
+                onClick={()=>set('dailyDigestEnabled',!settings.dailyDigestEnabled)}
+                className={`w-12 h-6 rounded-full transition-colors relative flex-shrink-0 ${settings.dailyDigestEnabled?'bg-indigo-600':'bg-gray-300'}`}>
+                <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${settings.dailyDigestEnabled?'left-6':'left-0.5'}`} />
+              </button>
+            </div>
+
+            {/* Config body – shown when enabled */}
+            {settings.dailyDigestEnabled && (
+              <div className={`px-4 py-4 space-y-4 border-t ${dk?'border-gray-600 bg-gray-800':'border-indigo-100 bg-white'}`}>
+
+                {/* Time picker */}
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex-1 min-w-[180px]">
+                    <label className={`block text-xs font-semibold uppercase tracking-wide mb-1.5 ${dk?'text-gray-400':'text-gray-500'}`}>Send Time (24-hour)</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="time"
+                        value={settings.dailyDigestTime || '08:00'}
+                        onChange={e=>set('dailyDigestTime', e.target.value)}
+                        className={inputCls + ' w-36'}
+                      />
+                      <span className={`text-xs ${sub}`}>local time, daily</span>
+                    </div>
+                  </div>
+
+                  {/* Next-send preview */}
+                  <div className={`flex-1 min-w-[200px] rounded-xl p-3 text-xs ${dk?'bg-gray-700':'bg-indigo-50'}`}>
+                    {(() => {
+                      const t = settings.dailyDigestTime || '08:00';
+                      const [hh,mm] = t.split(':').map(Number);
+                      const now = new Date();
+                      const next = new Date();
+                      next.setHours(hh, mm, 0, 0);
+                      if (next <= now) next.setDate(next.getDate()+1);
+                      const diff = Math.round((next - now) / 60000);
+                      const hrs  = Math.floor(diff/60);
+                      const mins = diff % 60;
+                      const lastSent = localStorage.getItem('lastDailyDigestSent');
+                      const lastSentStr = lastSent ? new Date(lastSent).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Never';
+                      return (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span>⏰</span>
+                            <span className={`font-semibold ${dk?'text-indigo-300':'text-indigo-700'}`}>
+                              Next dispatch in {hrs > 0 ? `${hrs}h ` : ''}{mins}m
+                            </span>
+                          </div>
+                          <div className={`flex items-center gap-1.5 ${sub}`}>
+                            <span>📤</span> Last sent: {lastSentStr}
+                          </div>
+                          <div className={`flex items-center gap-1.5 ${sub}`}>
+                            <span>📝</span> Queued activities: {(window.__digestLog||[]).length}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* What's included */}
+                <div className={`rounded-xl p-3 text-xs space-y-1.5 ${dk?'bg-gray-700 text-gray-300':'bg-indigo-50 text-indigo-900'}`}>
+                  <p className="font-semibold mb-1">📋 Digest includes:</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {['🚨 All overdue requirements', '⏰ Items due within 7 days', '📜 Full 24h activity log', '🏁 Requirements closed today',
+                      '🆕 Requirements added today', '📊 Overall compliance %', '🏭 Plant-wise summary', '🔗 Direct portal link'].map(item=>(
+                      <div key={item} className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Send Now test button */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={async ()=>{
+                      const raw2 = localStorage.getItem('adminSettings');
+                      if (!raw2) return;
+                      const cfg2 = JSON.parse(raw2);
+                      // Temporarily force enabled so test fires even if toggle was just turned on
+                      cfg2.dailyDigestEnabled = true;
+                      localStorage.setItem('adminSettings', JSON.stringify(cfg2));
+                      // We need requirements/plants/users from parent — signal via custom event
+                      window.dispatchEvent(new CustomEvent('legalcomp:send_daily_digest'));
+                      showToast('📬 Daily digest send triggered! Check email in a moment.', 'success');
+                    }}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-md shadow-indigo-200 flex items-center gap-2"
+                  >
+                    📬 Send Digest Now (Test)
+                  </button>
+                  <span className={`text-xs ${sub}`}>Sends immediately using current data — useful for testing.</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4234,6 +4732,20 @@ function App() {
   const updateCategories   = c => { setCategories(c); CATEGORIES = c; try { localStorage.setItem('categories', JSON.stringify(c)); } catch(_){} };
   const toggleTheme = () => { const t=theme==='light'?'dark':'light'; setTheme(t); persistStr('theme',t); };
 
+  /* ── Daily Digest Scheduler ── */
+  useDailyDigestScheduler(requirements || [], plants, users);
+
+  /* ── "Send Now" custom event listener (from Settings test button) ── */
+  useEffect(() => {
+    const handler = () => {
+      if (requirements && plants && users) {
+        sendDailyDigestMail(requirements, plants, users);
+      }
+    };
+    window.addEventListener('legalcomp:send_daily_digest', handler);
+    return () => window.removeEventListener('legalcomp:send_daily_digest', handler);
+  }, [requirements, plants, users]);
+
   const login = (email, password) => {
     const u = users.find(x => x.email.toLowerCase()===email.toLowerCase() && x.password===password);
     if (!u) return false;
@@ -4271,12 +4783,8 @@ function App() {
   return <UserDashboard {...ctx} />;
 }
 
-// Mount React only after anonymous auth resolves — same pattern as Plant Visit app
-// Mount React after anonymous auth resolves — same pattern as Plant Visit app
-window._fbAuthReady.finally(() => {
-  const root = ReactDOM.createRoot(document.getElementById('root'));
-  root.render(<App />);
-});
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
 </script>
 </body>
 </html>
