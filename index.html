@@ -60,10 +60,24 @@
     window.db = firebase.firestore();
     window.fbAuth = firebase.auth();
     console.log("✅ Firebase initialized — project: skr-task");
-    // Help: print the exact redirect URI that must be registered in Azure AD
-    // App registrations → Authentication → Single-page application → Redirect URIs
     const _azureRedirectUri = window.location.href.split('?')[0].split('#')[0];
     console.info(`ℹ️  Azure AD Redirect URI to register: ${_azureRedirectUri}`);
+
+    // Sign in anonymously so request.auth != null satisfies Firestore security rules.
+    // React app mounts only after auth resolves (or fails) to avoid permission errors.
+    window._fbAuthReady = new Promise((resolve) => {
+      firebase.auth().onAuthStateChanged(user => {
+        if (user) { console.log('✅ Firebase Auth ready, uid:', user.uid); resolve(user); }
+      });
+      firebase.auth().signInAnonymously()
+        .then(() => console.log('✅ signInAnonymously OK'))
+        .catch(err => {
+          console.error('❌ signInAnonymously failed:', err.code, err.message);
+          resolve(null); // resolve anyway so app still loads from localStorage
+        });
+      // Safety net: mount after 5s even if auth hangs
+      setTimeout(() => resolve(null), 5000);
+    });
   </script>
 
   <style>
@@ -4268,8 +4282,11 @@ function App() {
   return <UserDashboard {...ctx} />;
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+// Wait for Firebase Auth before mounting React — prevents Firestore permission errors
+window._fbAuthReady.then(() => {
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
+});
 </script>
 </body>
 </html>
