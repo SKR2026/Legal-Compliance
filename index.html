@@ -4442,18 +4442,18 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
                 <Badge label={selReq.category}  color="#6366f1" />
                 <Badge label={`L${selReq.escalationLevel} Escalation`} color="#8b5cf6" />
               </div>
-              <p className="text-gray-600 dark:text-gray-400 leading-relaxed">{selReq.description}</p>
+              <p className={`leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{selReq.description}</p>
               <div className="grid grid-cols-2 gap-3">
                 {[['📅 Due Date',formatDate(selReq.dueDate)],['🔔 Reminder',selReq.reminderFrequency],['🏭 Plant',myPlant?.name||'—'],['📧 Escalation',selReq.escalationEmail||'—']].map(([l,v])=>(
                   <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
-                    <p className={`text-xs ${sub} mb-0.5`}>{l}</p>
-                    <p className="font-medium text-xs">{v}</p>
+                    <p className={`text-xs mb-0.5 ${dk?'text-gray-400':'text-gray-500'}`}>{l}</p>
+                    <p className={`font-medium text-xs ${dk?'text-gray-100':'text-gray-800'}`}>{v}</p>
                   </div>
                 ))}
               </div>
 
               <div>
-                <p className="font-semibold mb-2 text-xs uppercase tracking-wide text-gray-500">Update Status</p>
+                <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>Update Status</p>
                 <div className="flex flex-wrap gap-2">
                   {STATUSES.map(s=>(
                     <button key={s} onClick={()=>updateStatus(selReq.id,s)}
@@ -4463,28 +4463,50 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
                     </button>
                   ))}
                 </div>
+                {(selReq.status==='In Progress'||selReq.status==='Completed') && (
+                  <div className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl border ${dk?'bg-indigo-900/30 border-indigo-700/50':'bg-indigo-50 border-indigo-100'}`}>
+                    <span className="text-lg mt-0.5">📎</span>
+                    <div className="flex-1">
+                      <p className={`text-xs font-semibold mb-0.5 ${dk?'text-indigo-300':'text-indigo-700'}`}>
+                        {selReq.status==='Completed' ? 'Completion evidence required' : 'Progress evidence recommended'}
+                      </p>
+                      <p className={`text-xs ${dk?'text-indigo-400':'text-indigo-500'}`}>
+                        {selReq.status==='Completed'
+                          ? 'Please attach supporting documents (certificates, reports, approvals) to confirm completion.'
+                          : 'Attach any interim documents, work orders, or proof of progress below.'}
+                      </p>
+                      <button onClick={()=>fileRef.current.click()} disabled={uploading}
+                        className={`mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-indigo-700 hover:bg-indigo-600 text-white':'bg-indigo-600 hover:bg-indigo-700 text-white'} disabled:opacity-50`}>
+                        {uploading ? '⏳ Uploading…' : '📂 Attach Evidence'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
-                <p className="font-semibold mb-2 text-xs uppercase tracking-wide text-gray-500">📎 Evidence / Documents</p>
+                <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>📎 Evidence / Documents</p>
+                {(selReq.evidence||[]).length === 0 && (
+                  <p className={`text-xs mb-2 ${dk?'text-gray-500':'text-gray-400'}`}>No evidence attached yet.</p>
+                )}
                 {(selReq.evidence||[]).map(e=>(
                   <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
                     <span className="text-xl">📄</span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{e.name}</p>
-                      <p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p>
+                      <p className={`text-sm font-medium truncate ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p>
+                      <p className={`text-xs ${dk?'text-gray-400':'text-gray-500'}`}>{e.size} · {formatDate(e.uploadedAt)}</p>
                     </div>
                   </div>
                 ))}
                 <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
                 <button onClick={()=>fileRef.current.click()} disabled={uploading}
-                  className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
+                  className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
                   {uploading?'Uploading…':'📎 Click to Attach Evidence'}
                 </button>
               </div>
 
               <div>
-                <p className="font-semibold mb-2 text-xs uppercase tracking-wide text-gray-500">💬 Comments</p>
+                <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>💬 Comments</p>
                 {(selReq.comments||[]).map(c=>{
                   const u=users.find(x=>x.id===c.userId);
                   return (
