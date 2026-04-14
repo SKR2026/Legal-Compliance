@@ -2285,22 +2285,24 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
   };
 
   /* ── Delete evidence files from Firebase Storage for a requirement ── */
+  /* ── Delete all Storage files for a requirement (called on req deletion) ── */
   const deleteReqStorageFiles = async (req) => {
     if (!window.fbStorage || !req) return;
+    await fbEnsureAuth();
     const evidenceList = req.evidence || [];
     for (const ev of evidenceList) {
-      if (ev.storageUrl) {
-        try {
-          // Derive storage path from URL: evidence/{reqId}/{evId}_{filename}
-          const path = `evidence/${req.id}/${ev.id}_${ev.name}`;
-          const ref = window.fbStorage.ref(path);
-          await ref.delete();
-          console.log('🗑️ Deleted from Firebase Storage:', path);
-        } catch(e) {
-          console.warn('Storage delete failed (may already be gone):', e.message);
-        }
+      if (!ev.storageUrl) continue; // base64-only, nothing in Storage
+      try {
+        const path = `evidence/${req.id}/${ev.id}_${ev.name}`;
+        await window.fbStorage.ref(path).delete();
+        console.log('🗑️ Deleted from Firebase Storage:', path);
+      } catch(e) {
+        console.warn('Storage delete failed (may already be gone):', e.message);
+        // Try alternate path
+        try { await window.fbStorage.ref(`evidence/${req.id}/${ev.id}`).delete(); } catch(_) {}
       }
     }
+    // Note: Firestore document entry is removed by updateRequirements() caller
   };
 
   const confirmDel = () => {
@@ -4884,9 +4886,10 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
       const updated = requirements.map(r => r.id===reqId ? {...r, evidence:[...(r.evidence||[]), ev]} : r);
       updateRequirements(updated);
       setSelReq(sr => ({...sr, evidence:[...(sr.evidence||[]), ev]}));
-      // ── Show success banner and auto-close modal ──
+      // ── Show brief "attached" banner but keep modal open ──
+      // Modal only closes when the user clicks Send
       setEvidenceSent(true);
-      setTimeout(() => { setEvidenceSent(false); setSelReq(null); }, 1800);
+      setTimeout(() => setEvidenceSent(false), 2200);
     } catch(err) {
       console.error('uploadEvidence failed:', err);
       alert('Upload failed: ' + err.message);
@@ -4897,17 +4900,37 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
   const deleteEvidence = async (reqId, evId) => {
     const req = requirements.find(r => r.id === reqId);
     const ev  = req?.evidence?.find(e => e.id === evId);
-    if (ev?.storageUrl && window.fbStorage) {
+    if (!ev) return;
+
+    // 1. Delete file from Firebase Storage (cross-device files)
+    if (ev.storageUrl && window.fbStorage) {
       try {
+        await fbEnsureAuth();
         const path = `evidence/${reqId}/${evId}_${ev.name}`;
         await window.fbStorage.ref(path).delete();
-      } catch(e) { console.warn('Storage delete failed:', e.message); }
+        console.log('🗑️ Deleted from Firebase Storage:', path);
+      } catch(e) {
+        // File may already be gone or path mismatch — log but continue
+        console.warn('Storage delete failed (may already be removed):', e.message);
+        // Try alternate path in case name was sanitised differently
+        try {
+          const altPath = `evidence/${reqId}/${evId}`;
+          await window.fbStorage.ref(altPath).delete();
+          console.log('🗑️ Deleted from Firebase Storage (alt path):', altPath);
+        } catch(_) {}
+      }
+    } else if (!ev.storageUrl) {
+      // base64-only file — lives only in Firestore document, no Storage entry to delete
+      console.log('ℹ️ Evidence was base64-only, no Firebase Storage entry to delete.');
     }
+
+    // 2. Remove evidence entry from Firestore (via updateRequirements → fbSave)
     const updated = requirements.map(r =>
       r.id === reqId ? { ...r, evidence: (r.evidence || []).filter(e => e.id !== evId) } : r
     );
-    updateRequirements(updated);
+    updateRequirements(updated);  // persists to localStorage + Firestore document
     setSelReq(sr => sr ? { ...sr, evidence: (sr.evidence || []).filter(e => e.id !== evId) } : sr);
+    console.log('✅ Evidence entry removed from Firestore document (reqId:', reqId, ', evId:', evId, ')');
   };
 
   const downloadEvidence = (ev) => {
@@ -5082,8 +5105,8 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
             })}
             <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
             {evidenceSent ? (
-              <div className="w-full py-3 rounded-xl flex items-center justify-center gap-2 bg-green-500 text-white text-sm font-semibold animate-pulse">
-                ✅ Evidence sent successfully! Closing…
+              <div className="w-full py-3 rounded-xl flex items-center justify-center gap-2 bg-green-500 text-white text-sm font-semibold">
+                ✅ File attached! Click Send to submit.
               </div>
             ) : (
               <button onClick={()=>fileRef.current.click()} disabled={uploading}
