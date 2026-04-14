@@ -275,8 +275,126 @@ function FirebaseStatusBadge() {
   );
 }
 
+/* ─── DOWNLOAD EVIDENCE HELPER ─── */
+function downloadEvidence(ev) {
+  // ev.url is available if Firebase Storage was used; otherwise show name
+  if (ev.url) {
+    const a = document.createElement('a');
+    a.href = ev.url;
+    a.download = ev.name || 'evidence';
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    alert(`📎 File: ${ev.name}\n\nThis file was attached before cloud storage was configured.\nPlease contact your system administrator to retrieve this file.`);
+  }
+}
+
+/* ─── NOTIFICATION BELL ─── */
+function NotificationBell({ dk, requirements, role }) {
+  const [open, setOpen] = React.useState(false);
+  const [seen, setSeen] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('notif_seen') || '[]'); } catch { return []; }
+  });
+  const ref = React.useRef(null);
+
+  // Build notifications: overdue + newly uploaded evidence
+  const notifications = React.useMemo(() => {
+    const list = [];
+    requirements.forEach(r => {
+      if (r.status === 'Overdue') {
+        list.push({ id: `overdue-${r.id}`, type: 'overdue', title: r.title, plant: r.plantId, ts: r.dueDate, msg: `Overdue since ${r.dueDate}` });
+      }
+      (r.evidence || []).forEach(ev => {
+        list.push({ id: `ev-${ev.id}`, type: 'evidence', title: r.title, plant: r.plantId, ts: ev.uploadedAt, msg: `📎 Evidence uploaded: ${ev.name}` });
+      });
+    });
+    // Sort newest first
+    list.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    return list.slice(0, 30);
+  }, [requirements]);
+
+  const unreadIds = notifications.filter(n => !seen.includes(n.id)).map(n => n.id);
+  const unreadCount = unreadIds.length;
+
+  const markAllRead = () => {
+    const allIds = notifications.map(n => n.id);
+    localStorage.setItem('notif_seen', JSON.stringify(allIds));
+    setSeen(allIds);
+  };
+
+  // Close on outside click
+  React.useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const typeIcon = { overdue: '🚨', evidence: '📎' };
+  const typeColor = { overdue: dk ? 'text-red-400' : 'text-red-600', evidence: dk ? 'text-indigo-400' : 'text-indigo-600' };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => { setOpen(o => !o); }}
+        className={`relative p-2 rounded-lg transition-colors ${dk ? 'text-gray-300 hover:bg-gray-700' : 'text-slate-600 hover:bg-gray-100'}`}
+        title="Notifications"
+      >
+        <span className="text-lg">🔔</span>
+        {unreadCount > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 shadow">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className={`absolute right-0 top-full mt-2 w-80 rounded-2xl shadow-2xl border z-50 ${dk ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+          style={{ maxHeight: '420px', overflowY: 'auto' }}>
+          {/* Header */}
+          <div className={`flex items-center justify-between px-4 py-3 border-b sticky top-0 ${dk ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'}`}>
+            <p className={`font-semibold text-sm ${dk ? 'text-white' : 'text-gray-900'}`}>Notifications {unreadCount > 0 && <span className="ml-1 text-xs bg-red-500 text-white rounded-full px-1.5 py-0.5">{unreadCount}</span>}</p>
+            {unreadCount > 0 && (
+              <button onClick={markAllRead} className="text-xs text-indigo-500 hover:underline font-medium">Mark all read</button>
+            )}
+          </div>
+
+          {/* List */}
+          {notifications.length === 0 ? (
+            <div className="px-4 py-8 text-center">
+              <p className="text-2xl mb-2">🎉</p>
+              <p className={`text-sm ${dk ? 'text-gray-400' : 'text-gray-500'}`}>No notifications yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              {notifications.map(n => {
+                const isUnread = !seen.includes(n.id);
+                return (
+                  <div key={n.id}
+                    className={`px-4 py-3 transition-colors cursor-default ${isUnread ? (dk ? 'bg-indigo-900/20' : 'bg-indigo-50/60') : ''} ${dk ? 'hover:bg-gray-700/50' : 'hover:bg-gray-50'}`}>
+                    <div className="flex items-start gap-2">
+                      <span className="text-base mt-0.5 flex-shrink-0">{typeIcon[n.type]}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-xs font-semibold truncate ${typeColor[n.type]}`}>{n.title}</p>
+                        <p className={`text-xs mt-0.5 ${dk ? 'text-gray-300' : 'text-gray-600'}`}>{n.msg}</p>
+                        <p className={`text-[10px] mt-0.5 ${dk ? 'text-gray-500' : 'text-gray-400'}`}>{n.ts ? new Date(n.ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</p>
+                      </div>
+                      {isUnread && <span className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0 mt-1.5"></span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── APP SHELL ─── */
-function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage, children, role, logout }) {
+function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage, children, role, logout, requirements }) {
   const [collapsed, setCollapsed] = useState(false);
   const roleTag = { admin:'Administrator', top_management:'Top Management', plant_head:'Plant Head', user:'Team Member' }[role];
   const roleBg  = { admin:'bg-indigo-100 text-indigo-700', top_management:'bg-purple-100 text-purple-700', plant_head:'bg-teal-100 text-teal-700', user:'bg-green-100 text-green-700' }[role];
@@ -341,6 +459,10 @@ function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage
           <div className="flex items-center gap-2">
             {/* Firebase connection status */}
             <FirebaseStatusBadge />
+            {/* Notification Bell — admin & top management only */}
+            {(role === 'admin' || role === 'top_management') && requirements && (
+              <NotificationBell dk={dk} requirements={requirements} role={role} />
+            )}
             <button onClick={toggleTheme} className={`p-2 rounded-lg transition-colors ${dk?'text-yellow-400 hover:bg-gray-700':'text-slate-600 hover:bg-gray-100'}`} title="Toggle Theme">
               {dk?'☀️':'🌙'}
             </button>
@@ -2174,7 +2296,12 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                   {viewReq.evidence.map(e=>(
                     <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
                       <span className="text-xl">📄</span>
-                      <div><p className={`text-sm font-medium ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p><p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
+                      <div className="flex-1"><p className={`text-sm font-medium ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p><p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
+                      <button onClick={()=>downloadEvidence(e)}
+                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-indigo-600 hover:bg-indigo-700 text-white':'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
+                        title={`Download ${e.name}`}>
+                        ⬇️ Download
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -4174,7 +4301,8 @@ function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requireme
 
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
-      activePage={activePage} setActivePage={setActivePage} role="admin" logout={logout}>
+      activePage={activePage} setActivePage={setActivePage} role="admin" logout={logout}
+      requirements={requirements}>
       {pages[activePage]}
     </AppShell>
   );
@@ -4197,7 +4325,8 @@ function TopManagementDashboard({ dk, toggleTheme, currentUser, plants, users, r
 
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
-      activePage={activePage} setActivePage={setActivePage} role="top_management" logout={logout}>
+      activePage={activePage} setActivePage={setActivePage} role="top_management" logout={logout}
+      requirements={requirements}>
       {pages[activePage]}
     </AppShell>
   );
@@ -4496,6 +4625,11 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
                       <p className={`text-sm font-medium truncate ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p>
                       <p className={`text-xs ${dk?'text-gray-400':'text-gray-500'}`}>{e.size} · {formatDate(e.uploadedAt)}</p>
                     </div>
+                    <button onClick={()=>downloadEvidence(e)}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-indigo-600 hover:bg-indigo-700 text-white flex-shrink-0`}
+                      title={`Download ${e.name}`}>
+                      ⬇️
+                    </button>
                   </div>
                 ))}
                 <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
