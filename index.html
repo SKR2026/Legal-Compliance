@@ -2283,13 +2283,42 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
       if (oldAssignee) sendComplianceMail({ trigger:'reassignment', req:updated, plant, assignee:primaryAssignee||null, oldAssignee, changedBy:null });
     });
   };
-  const confirmDel = () => { updateRequirements(requirements.filter(r=>r.id!==delId)); setDelId(null); };
+
+  /* ── Delete evidence files from Firebase Storage for a requirement ── */
+  const deleteReqStorageFiles = async (req) => {
+    if (!window.fbStorage || !req) return;
+    const evidenceList = req.evidence || [];
+    for (const ev of evidenceList) {
+      if (ev.storageUrl) {
+        try {
+          // Derive storage path from URL: evidence/{reqId}/{evId}_{filename}
+          const path = `evidence/${req.id}/${ev.id}_${ev.name}`;
+          const ref = window.fbStorage.ref(path);
+          await ref.delete();
+          console.log('🗑️ Deleted from Firebase Storage:', path);
+        } catch(e) {
+          console.warn('Storage delete failed (may already be gone):', e.message);
+        }
+      }
+    }
+  };
+
+  const confirmDel = () => {
+    const req = requirements.find(r => r.id === delId);
+    updateRequirements(requirements.filter(r => r.id !== delId));
+    setDelId(null);
+    // Delete associated Firebase Storage files asynchronously
+    if (req) deleteReqStorageFiles(req);
+  };
 
   /* ── Bulk delete ── */
   const confirmBulkDelete = () => {
+    const toDelete = requirements.filter(r => selected.has(r.id));
     updateRequirements(requirements.filter(r => !selected.has(r.id)));
     setSelected(new Set());
     setBulkConfirm(false);
+    // Delete associated Firebase Storage files for each deleted requirement
+    toDelete.forEach(req => deleteReqStorageFiles(req));
   };
 
   const card = `rounded-2xl border shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
@@ -4774,6 +4803,7 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
   const [selReq, setSelReq] = useState(null);
   const [comment, setComment] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [evidenceSent, setEvidenceSent] = useState(false);
   const fileRef = useRef();
 
   // Auto-open requirement from notification bell
@@ -4852,6 +4882,9 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
       const updated = requirements.map(r => r.id===reqId ? {...r, evidence:[...(r.evidence||[]), ev]} : r);
       updateRequirements(updated);
       setSelReq(sr => ({...sr, evidence:[...(sr.evidence||[]), ev]}));
+      // ── Show success banner and auto-close modal ──
+      setEvidenceSent(true);
+      setTimeout(() => { setEvidenceSent(false); setSelReq(null); }, 1800);
     } catch(err) {
       console.error('uploadEvidence failed:', err);
       alert('Upload failed: ' + err.message);
@@ -5025,10 +5058,16 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
               );
             })}
             <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
-            <button onClick={()=>fileRef.current.click()} disabled={uploading}
-              className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
-              {uploading?'Uploading…':'📎 Click to Attach Evidence'}
-            </button>
+            {evidenceSent ? (
+              <div className="w-full py-3 rounded-xl flex items-center justify-center gap-2 bg-green-500 text-white text-sm font-semibold animate-pulse">
+                ✅ Evidence sent successfully! Closing…
+              </div>
+            ) : (
+              <button onClick={()=>fileRef.current.click()} disabled={uploading}
+                className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
+                {uploading?'Uploading…':'📎 Click to Attach Evidence'}
+              </button>
+            )}
           </div>
 
           <div>
