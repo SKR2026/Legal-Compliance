@@ -41,6 +41,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 
   <!-- Firebase Initialization -->
   <script>
@@ -59,6 +60,7 @@
     // Expose Firestore globally so React components can use it
     window.db = firebase.firestore();
     window.fbAuth = firebase.auth();
+    window.fbStorage = firebase.storage();
     // Keep anonymous auth session alive across page reloads
     window.fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
     console.log("✅ Firebase initialized — project: skr-task");
@@ -279,18 +281,23 @@ function FirebaseStatusBadge() {
 
 /* ─── DOWNLOAD EVIDENCE HELPER ─── */
 function downloadEvidence(ev) {
-  // ev.url is available if Firebase Storage was used; otherwise show name
-  if (ev.url) {
-    const a = document.createElement('a');
-    a.href = ev.url;
-    a.download = ev.name || 'evidence';
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } else {
-    alert(`📎 File: ${ev.name}\n\nThis file was attached before cloud storage was configured.\nPlease contact your system administrator to retrieve this file.`);
+  const url = ev.storageUrl || ev.url || ev.dataUrl;
+  if (!url) {
+    alert('File not available. Please re-upload.');
+    return;
   }
+  // storageUrl / external URL: open in new tab
+  if (ev.storageUrl || ev.url) {
+    window.open(url, '_blank');
+    return;
+  }
+  // base64 fallback
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = ev.name || 'evidence';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /* ─── NOTIFICATION BELL ─── */
@@ -2076,8 +2083,13 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
   const set = (k,v) => { setFilters(f=>({...f,[k]:v})); setSelected(new Set()); };
 
   const downloadEvidence = (ev) => {
-    if (!ev.dataUrl) {
-      alert('File data not available. This evidence was uploaded before download support was added. Please ask the user to re-upload.');
+    const url = ev.storageUrl || ev.dataUrl;
+    if (!url) {
+      alert('File not available. Please ask the user to re-upload.');
+      return;
+    }
+    if (ev.storageUrl) {
+      window.open(ev.storageUrl, '_blank');
       return;
     }
     const a = document.createElement('a');
@@ -2309,8 +2321,9 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                 <div>
                   <p className={`font-semibold mb-2 ${dk?'text-white':'text-gray-800'}`}>📎 Evidence</p>
                   {viewReq.evidence.map(e=>{
-                    const isImage = e.dataUrl && (e.mimeType||'').startsWith('image/');
-                    const isPdf   = e.dataUrl && (e.mimeType==='application/pdf' || e.name.toLowerCase().endsWith('.pdf'));
+                    const fileUrl = e.storageUrl || e.dataUrl;
+                    const isImage = fileUrl && (e.mimeType||'').startsWith('image/');
+                    const isPdf   = fileUrl && (e.mimeType==='application/pdf' || e.name.toLowerCase().endsWith('.pdf'));
                     const canPreview = isImage || isPdf;
                     const fileIcon = isImage ? '🖼️' : isPdf ? '📑' : '📄';
                     return (
@@ -2323,7 +2336,7 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                           </div>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
                             {canPreview && (
-                              <button onClick={()=>{ const w=window.open(); w.document.write(isImage?`<img src="${e.dataUrl}" style="max-width:100%;display:block;margin:auto">` : `<iframe src="${e.dataUrl}" style="width:100vw;height:100vh;border:none"></iframe>`); }}
+                              <button onClick={()=>{ window.open(fileUrl, '_blank'); }}
                                 className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-gray-600 hover:bg-gray-500 text-gray-100':'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
                                 title={`View ${e.name}`}>
                                 👁️ View
@@ -2336,9 +2349,9 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                             </button>
                           </div>
                         </div>
-                        {isImage && e.dataUrl && (
+                        {isImage && fileUrl && (
                           <div className="px-3 pb-3">
-                            <img src={e.dataUrl} alt={e.name} className="w-full max-h-48 object-contain rounded-lg border" style={{background: dk?'#111827':'#f9fafb'}} />
+                            <img src={fileUrl} alt={e.name} className="w-full max-h-48 object-contain rounded-lg border" style={{background: dk?'#111827':'#f9fafb'}} />
                           </div>
                         )}
                       </div>
@@ -4582,25 +4595,68 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
 
   const uploadEvidence = async (reqId, file) => {
     setUploading(true);
-    // Read file as base64 dataUrl so we can offer download later
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = e => resolve(e.target.result);
-      reader.onerror = () => reject(new Error('Read failed'));
-      reader.readAsDataURL(file);
-    });
-    const ev = { id:`ev${Date.now()}`, name:file.name, size:`${Math.round(file.size/1024)} KB`, uploadedAt:new Date().toISOString(), uploadedBy:currentUser.id, dataUrl, mimeType: file.type };
-    const updated = requirements.map(r=>r.id===reqId?{...r,evidence:[...(r.evidence||[]),ev]}:r);
-    updateRequirements(updated);
-    setSelReq(sr=>({...sr,evidence:[...(sr.evidence||[]),ev]}));
+    try {
+      const evId = `ev${Date.now()}`;
+      let storageUrl = null;
+      let dataUrl = null;
+
+      // Try Firebase Storage first (cross-device visibility)
+      if (window.fbStorage) {
+        try {
+          await fbEnsureAuth();
+          const path = `evidence/${reqId}/${evId}_${file.name}`;
+          const ref = window.fbStorage.ref(path);
+          await ref.put(file);
+          storageUrl = await ref.getDownloadURL();
+          console.log('✅ Uploaded to Firebase Storage:', storageUrl);
+        } catch(storageErr) {
+          console.warn('Firebase Storage upload failed, falling back to base64:', storageErr.message);
+        }
+      }
+
+      // Fallback: base64 dataUrl (same-device only)
+      if (!storageUrl) {
+        dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target.result);
+          reader.onerror = () => reject(new Error('Read failed'));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      const ev = {
+        id: evId,
+        name: file.name,
+        size: `${(file.size/1024).toFixed(1)} KB`,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: currentUser.id,
+        mimeType: file.type,
+        storageUrl,   // cross-device URL from Firebase Storage
+        dataUrl,      // fallback base64 (null if storageUrl succeeded)
+      };
+
+      const updated = requirements.map(r => r.id===reqId ? {...r, evidence:[...(r.evidence||[]), ev]} : r);
+      updateRequirements(updated);
+      setSelReq(sr => ({...sr, evidence:[...(sr.evidence||[]), ev]}));
+    } catch(err) {
+      console.error('uploadEvidence failed:', err);
+      alert('Upload failed: ' + err.message);
+    }
     setUploading(false);
   };
 
   const downloadEvidence = (ev) => {
-    if (!ev.dataUrl) {
-      alert('File data not available. Please re-upload the file.');
+    const url = ev.storageUrl || ev.dataUrl;
+    if (!url) {
+      alert('File not available. Please re-upload.');
       return;
     }
+    // storageUrl: open in new tab (cross-origin download)
+    if (ev.storageUrl) {
+      window.open(ev.storageUrl, '_blank');
+      return;
+    }
+    // dataUrl fallback: direct download
     const a = document.createElement('a');
     a.href = ev.dataUrl;
     a.download = ev.name;
@@ -4718,8 +4774,9 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
               <p className={`text-xs mb-2 ${dk?'text-gray-500':'text-gray-400'}`}>No evidence attached yet.</p>
             )}
             {(selReq.evidence||[]).map(e=>{
-              const isImage = e.dataUrl && (e.mimeType||'').startsWith('image/');
-              const isPdf   = e.dataUrl && (e.mimeType==='application/pdf' || e.name.toLowerCase().endsWith('.pdf'));
+              const fileUrl = e.storageUrl || e.dataUrl;
+              const isImage = fileUrl && (e.mimeType||'').startsWith('image/');
+              const isPdf   = fileUrl && (e.mimeType==='application/pdf' || e.name.toLowerCase().endsWith('.pdf'));
               const canPreview = isImage || isPdf;
               const fileIcon = isImage ? '🖼️' : isPdf ? '📑' : '📄';
               return (
@@ -4732,7 +4789,7 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {canPreview && (
-                        <button onClick={()=>{ const w=window.open(); w.document.write(isImage?`<img src="${e.dataUrl}" style="max-width:100%;display:block;margin:auto">` : `<iframe src="${e.dataUrl}" style="width:100vw;height:100vh;border:none"></iframe>`); }}
+                        <button onClick={()=>{ window.open(fileUrl, '_blank'); }}
                           className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-gray-600 hover:bg-gray-500 text-gray-100':'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
                           title={`View ${e.name}`}>
                           👁️ View
@@ -4745,9 +4802,9 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
                       </button>
                     </div>
                   </div>
-                  {isImage && e.dataUrl && (
+                  {isImage && fileUrl && (
                     <div className={`px-3 pb-3`}>
-                      <img src={e.dataUrl} alt={e.name} className="w-full max-h-48 object-contain rounded-lg border" style={{background: dk?'#111827':'#f9fafb'}} />
+                      <img src={fileUrl} alt={e.name} className="w-full max-h-48 object-contain rounded-lg border" style={{background: dk?'#111827':'#f9fafb'}} />
                     </div>
                   )}
                 </div>
