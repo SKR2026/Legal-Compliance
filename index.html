@@ -59,6 +59,8 @@
     // Expose Firestore globally so React components can use it
     window.db = firebase.firestore();
     window.fbAuth = firebase.auth();
+    // Keep anonymous auth session alive across page reloads
+    window.fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
     console.log("✅ Firebase initialized — project: skr-task");
     // Help: print the exact redirect URI that must be registered in Azure AD
     // App registrations → Authentication → Single-page application → Redirect URIs
@@ -4823,7 +4825,22 @@ const FB_PLANTS = 'legalcomp_plants';
 const FB_USERS  = 'legalcomp_users';
 const FB_REQS   = 'legalcomp_requirements';
 
+/* ── Ensure Firebase has an auth token before any Firestore read ──
+   Uses Anonymous Auth so Firestore rules (request.auth != null) always pass.
+   If anonymous auth is disabled in Firebase console, this is a no-op and
+   you must set Firestore rules to: allow read, write: if true;            ── */
+async function fbEnsureAuth() {
+  try {
+    if (!window.fbAuth.currentUser) {
+      await window.fbAuth.signInAnonymously();
+    }
+  } catch(e) {
+    console.warn('Anonymous auth failed (may be disabled in Firebase console):', e.message);
+  }
+}
+
 async function fbLoad(col) {
+  await fbEnsureAuth();
   try {
     const snap = await window.db.collection(col).doc('data').get();
     if (snap.exists) return snap.data().items || null;
@@ -4832,16 +4849,18 @@ async function fbLoad(col) {
 }
 
 async function fbSave(col, items) {
+  await fbEnsureAuth();
   try {
     await window.db.collection(col).doc('data').set({ items, updatedAt: new Date().toISOString() });
   } catch(e) { console.warn('fbSave failed', col, e); }
 }
 
 function fbListen(col, cb) {
+  // Auth is already ensured by boot() before listeners are set up
   try {
     return window.db.collection(col).doc('data').onSnapshot(snap => {
       if (snap.exists) cb(snap.data().items || []);
-    });
+    }, e => { console.warn('fbListen error', col, e); });
   } catch(e) { console.warn('fbListen failed', col, e); return () => {}; }
 }
 
@@ -4871,11 +4890,18 @@ function App() {
 
       setSyncStatus('syncing');
       try {
+        // Step 1: Authenticate anonymously so Firestore rules pass on all devices
+        await fbEnsureAuth();
+        console.log('✅ Auth user:', window.fbAuth.currentUser?.uid || 'none');
+
+        // Step 2: Load all data from Firestore
+        console.log('⏳ Loading data from Firestore…');
         const [fbP, fbU, fbR] = await Promise.all([
           fbLoad(FB_PLANTS),
           fbLoad(FB_USERS),
           fbLoad(FB_REQS),
         ]);
+        console.log(`📦 Firestore: ${fbP?.length||0} plants, ${fbU?.length||0} users, ${fbR?.length||0} requirements`);
 
         // Plants
         if (fbP && fbP.length > 0) {
