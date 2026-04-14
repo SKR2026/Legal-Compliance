@@ -4619,130 +4619,6 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
           <StatCard dk={dk} label="Overdue"     value={myReqs.filter(r=>r.status==='Overdue').length}     icon="🚨" color="bg-red-100 text-red-600" sub="Action needed" />
         </div>
 
-        <Modal open={!!selReq} onClose={()=>setSelReq(null)} title={selReq?.title} wide dk={dk}>
-          {selReq && (
-            <div className="space-y-4 text-sm">
-              <div className="flex flex-wrap gap-2">
-                <Badge label={selReq.status}   color={STATUS_CLR[selReq.status]}  />
-                <Badge label={selReq.priority}  color={PRIORITY_CLR[selReq.priority]} />
-                <Badge label={selReq.category}  color="#6366f1" />
-                <Badge label={`L${selReq.escalationLevel} Escalation`} color="#8b5cf6" />
-              </div>
-              <p className={`leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{selReq.description}</p>
-              <div className="grid grid-cols-2 gap-3">
-                {[['📅 Due Date',formatDate(selReq.dueDate)],['🔔 Reminder',selReq.reminderFrequency],['🏭 Plant',myPlant?.name||'—'],['📧 Escalation',selReq.escalationEmail||'—']].map(([l,v])=>(
-                  <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
-                    <p className={`text-xs mb-0.5 ${dk?'text-gray-400':'text-gray-500'}`}>{l}</p>
-                    <p className={`font-medium text-xs ${dk?'text-gray-100':'text-gray-800'}`}>{v}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div>
-                <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>Update Status</p>
-                <div className="flex flex-wrap gap-2">
-                  {STATUSES.map(s=>(
-                    <button key={s} onClick={()=>updateStatus(selReq.id,s)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all ${selReq.status===s?'border-transparent text-white':dk?'border-gray-600':'border-gray-200'}`}
-                      style={selReq.status===s?{background:STATUS_CLR[s]}:{color:STATUS_CLR[s]}}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                {(selReq.status==='In Progress'||selReq.status==='Completed') && (
-                  <div className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl border ${dk?'bg-indigo-900/30 border-indigo-700/50':'bg-indigo-50 border-indigo-100'}`}>
-                    <span className="text-lg mt-0.5">📎</span>
-                    <div className="flex-1">
-                      <p className={`text-xs font-semibold mb-0.5 ${dk?'text-indigo-300':'text-indigo-700'}`}>
-                        {selReq.status==='Completed' ? 'Completion evidence required' : 'Progress evidence recommended'}
-                      </p>
-                      <p className={`text-xs ${dk?'text-indigo-400':'text-indigo-500'}`}>
-                        {selReq.status==='Completed'
-                          ? 'Please attach supporting documents (certificates, reports, approvals) to confirm completion.'
-                          : 'Attach any interim documents, work orders, or proof of progress below.'}
-                      </p>
-                      <button onClick={()=>fileRef.current.click()} disabled={uploading}
-                        className={`mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-indigo-700 hover:bg-indigo-600 text-white':'bg-indigo-600 hover:bg-indigo-700 text-white'} disabled:opacity-50`}>
-                        {uploading ? '⏳ Uploading…' : '📂 Attach Evidence'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>📎 Evidence / Documents</p>
-                {(selReq.evidence||[]).length === 0 && (
-                  <p className={`text-xs mb-2 ${dk?'text-gray-500':'text-gray-400'}`}>No evidence attached yet.</p>
-                )}
-                {(selReq.evidence||[]).map(e=>{
-                  const isImage = e.dataUrl && (e.mimeType||'').startsWith('image/');
-                  const isPdf   = e.dataUrl && (e.mimeType==='application/pdf' || e.name.toLowerCase().endsWith('.pdf'));
-                  const canPreview = isImage || isPdf;
-                  const fileIcon = isImage ? '🖼️' : isPdf ? '📑' : '📄';
-                  return (
-                    <div key={e.id} className={`mb-2 rounded-xl overflow-hidden border ${dk?'border-gray-600 bg-gray-700':'border-gray-200 bg-gray-50'}`}>
-                      <div className="flex items-center gap-3 p-3">
-                        <span className="text-xl flex-shrink-0">{fileIcon}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p>
-                          <p className={`text-xs ${dk?'text-gray-400':'text-gray-500'}`}>{e.size} · {formatDate(e.uploadedAt)}</p>
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          {canPreview && (
-                            <button onClick={()=>{ const w=window.open(); w.document.write(isImage?`<img src="${e.dataUrl}" style="max-width:100%;display:block;margin:auto">` : `<iframe src="${e.dataUrl}" style="width:100vw;height:100vh;border:none"></iframe>`); }}
-                              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-gray-600 hover:bg-gray-500 text-gray-100':'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
-                              title={`View ${e.name}`}>
-                              👁️ View
-                            </button>
-                          )}
-                          <button onClick={()=>downloadEvidence(e)}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-indigo-600 hover:bg-indigo-700 text-white"
-                            title={`Download ${e.name}`}>
-                            ⬇️ Download
-                          </button>
-                        </div>
-                      </div>
-                      {isImage && e.dataUrl && (
-                        <div className={`px-3 pb-3`}>
-                          <img src={e.dataUrl} alt={e.name} className="w-full max-h-48 object-contain rounded-lg border" style={{background: dk?'#111827':'#f9fafb'}} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
-                <button onClick={()=>fileRef.current.click()} disabled={uploading}
-                  className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
-                  {uploading?'Uploading…':'📎 Click to Attach Evidence'}
-                </button>
-              </div>
-
-              <div>
-                <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>💬 Comments</p>
-                {(selReq.comments||[]).map(c=>{
-                  const u=users.find(x=>x.id===c.userId);
-                  return (
-                    <div key={c.id} className={`p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(u?.name||'?')}</div>
-                        <span className="text-xs font-medium">{u?.name||'Unknown'}</span>
-                        <span className={`text-xs ${sub}`}>{formatDate(c.createdAt)}</span>
-                      </div>
-                      <p className={`text-xs ${sub}`}>{c.text}</p>
-                    </div>
-                  );
-                })}
-                <div className="flex gap-2">
-                  <input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Add a comment…" onKeyDown={e=>e.key==='Enter'&&addComment(selReq.id)}
-                    className={`${inputCls} flex-1 text-xs`} />
-                  <button onClick={()=>addComment(selReq.id)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-medium hover:bg-indigo-700 transition-colors">Send</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </Modal>
-
         <div className="grid grid-cols-1 gap-3">
           {myReqs.length === 0 && (
             <div className={`${card} p-10 text-center`}>
@@ -4781,6 +4657,133 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
     );
   };
 
+  /* ── Task detail modal — lives at UserDashboard level so state changes don't remount it ── */
+  const TaskModal = () => (
+    <Modal open={!!selReq} onClose={()=>setSelReq(null)} title={selReq?.title} wide dk={dk}>
+      {selReq && (
+        <div className="space-y-4 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <Badge label={selReq.status}   color={STATUS_CLR[selReq.status]}  />
+            <Badge label={selReq.priority}  color={PRIORITY_CLR[selReq.priority]} />
+            <Badge label={selReq.category}  color="#6366f1" />
+            <Badge label={`L${selReq.escalationLevel} Escalation`} color="#8b5cf6" />
+          </div>
+          <p className={`leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{selReq.description}</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['📅 Due Date',formatDate(selReq.dueDate)],['🔔 Reminder',selReq.reminderFrequency],['🏭 Plant',myPlant?.name||'—'],['📧 Escalation',selReq.escalationEmail||'—']].map(([l,v])=>(
+              <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                <p className={`text-xs mb-0.5 ${dk?'text-gray-400':'text-gray-500'}`}>{l}</p>
+                <p className={`font-medium text-xs ${dk?'text-gray-100':'text-gray-800'}`}>{v}</p>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>Update Status</p>
+            <div className="flex flex-wrap gap-2">
+              {STATUSES.map(s=>(
+                <button key={s} onClick={()=>updateStatus(selReq.id,s)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all ${selReq.status===s?'border-transparent text-white':dk?'border-gray-600':'border-gray-200'}`}
+                  style={selReq.status===s?{background:STATUS_CLR[s]}:{color:STATUS_CLR[s]}}>
+                  {s}
+                </button>
+              ))}
+            </div>
+            {(selReq.status==='In Progress'||selReq.status==='Completed') && (
+              <div className={`mt-3 flex items-start gap-2.5 p-3 rounded-xl border ${dk?'bg-indigo-900/30 border-indigo-700/50':'bg-indigo-50 border-indigo-100'}`}>
+                <span className="text-lg mt-0.5">📎</span>
+                <div className="flex-1">
+                  <p className={`text-xs font-semibold mb-0.5 ${dk?'text-indigo-300':'text-indigo-700'}`}>
+                    {selReq.status==='Completed' ? 'Completion evidence required' : 'Progress evidence recommended'}
+                  </p>
+                  <p className={`text-xs ${dk?'text-indigo-400':'text-indigo-500'}`}>
+                    {selReq.status==='Completed'
+                      ? 'Please attach supporting documents (certificates, reports, approvals) to confirm completion.'
+                      : 'Attach any interim documents, work orders, or proof of progress below.'}
+                  </p>
+                  <button onClick={()=>fileRef.current.click()} disabled={uploading}
+                    className={`mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-indigo-700 hover:bg-indigo-600 text-white':'bg-indigo-600 hover:bg-indigo-700 text-white'} disabled:opacity-50`}>
+                    {uploading ? '⏳ Uploading…' : '📂 Attach Evidence'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>📎 Evidence / Documents</p>
+            {(selReq.evidence||[]).length === 0 && (
+              <p className={`text-xs mb-2 ${dk?'text-gray-500':'text-gray-400'}`}>No evidence attached yet.</p>
+            )}
+            {(selReq.evidence||[]).map(e=>{
+              const isImage = e.dataUrl && (e.mimeType||'').startsWith('image/');
+              const isPdf   = e.dataUrl && (e.mimeType==='application/pdf' || e.name.toLowerCase().endsWith('.pdf'));
+              const canPreview = isImage || isPdf;
+              const fileIcon = isImage ? '🖼️' : isPdf ? '📑' : '📄';
+              return (
+                <div key={e.id} className={`mb-2 rounded-xl overflow-hidden border ${dk?'border-gray-600 bg-gray-700':'border-gray-200 bg-gray-50'}`}>
+                  <div className="flex items-center gap-3 p-3">
+                    <span className="text-xl flex-shrink-0">{fileIcon}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium truncate ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p>
+                      <p className={`text-xs ${dk?'text-gray-400':'text-gray-500'}`}>{e.size} · {formatDate(e.uploadedAt)}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {canPreview && (
+                        <button onClick={()=>{ const w=window.open(); w.document.write(isImage?`<img src="${e.dataUrl}" style="max-width:100%;display:block;margin:auto">` : `<iframe src="${e.dataUrl}" style="width:100vw;height:100vh;border:none"></iframe>`); }}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${dk?'bg-gray-600 hover:bg-gray-500 text-gray-100':'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
+                          title={`View ${e.name}`}>
+                          👁️ View
+                        </button>
+                      )}
+                      <button onClick={()=>downloadEvidence(e)}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors bg-indigo-600 hover:bg-indigo-700 text-white"
+                        title={`Download ${e.name}`}>
+                        ⬇️ Download
+                      </button>
+                    </div>
+                  </div>
+                  {isImage && e.dataUrl && (
+                    <div className={`px-3 pb-3`}>
+                      <img src={e.dataUrl} alt={e.name} className="w-full max-h-48 object-contain rounded-lg border" style={{background: dk?'#111827':'#f9fafb'}} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <input type="file" ref={fileRef} className="hidden" onChange={e=>{ if(e.target.files[0]) uploadEvidence(selReq.id,e.target.files[0]); e.target.value=''; }} />
+            <button onClick={()=>fileRef.current.click()} disabled={uploading}
+              className={`w-full py-2.5 rounded-xl border-2 border-dashed text-xs font-medium transition-colors ${dk?'border-gray-600 text-gray-300 hover:border-indigo-500 hover:text-indigo-400':'border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600'}`}>
+              {uploading?'Uploading…':'📎 Click to Attach Evidence'}
+            </button>
+          </div>
+
+          <div>
+            <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${dk?'text-gray-300':'text-gray-500'}`}>💬 Comments</p>
+            {(selReq.comments||[]).map(c=>{
+              const u=users.find(x=>x.id===c.userId);
+              return (
+                <div key={c.id} className={`p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(u?.name||'?')}</div>
+                    <span className="text-xs font-medium">{u?.name||'Unknown'}</span>
+                    <span className={`text-xs ${sub}`}>{formatDate(c.createdAt)}</span>
+                  </div>
+                  <p className={`text-xs ${sub}`}>{c.text}</p>
+                </div>
+              );
+            })}
+            <div className="flex gap-2">
+              <input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Add a comment…" onKeyDown={e=>e.key==='Enter'&&addComment(selReq.id)}
+                className={`${inputCls} flex-1 text-xs`} />
+              <button onClick={()=>addComment(selReq.id)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-medium hover:bg-indigo-700 transition-colors">Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+
   const Profile = () => (
     <div className="max-w-lg space-y-4">
       <div className={`${card} p-6 text-center`}>
@@ -4804,6 +4807,7 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
       activePage={activePage} setActivePage={setActivePage} role="user" logout={logout}>
+      <TaskModal />
       {pages[activePage]}
     </AppShell>
   );
