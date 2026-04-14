@@ -193,14 +193,14 @@ const Badge = ({ label, color }) => (
     style={{ background: color+'22', color }}>{label}</span>
 );
 
-function Modal({ open, onClose, title, children, wide }) {
+function Modal({ open, onClose, title, children, wide, dk }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{backdropFilter:'blur(4px)',background:'rgba(0,0,0,0.55)'}}>
-      <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${wide?'max-w-3xl':'max-w-lg'} max-h-[90vh] flex flex-col`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
-          <h2 className="font-semibold text-lg text-gray-900 dark:text-white">{title}</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">✕</button>
+      <div className={`rounded-2xl shadow-2xl w-full ${wide?'max-w-3xl':'max-w-lg'} max-h-[90vh] flex flex-col ${dk?'bg-gray-800':'bg-white'}`}>
+        <div className={`flex items-center justify-between px-6 py-4 border-b ${dk?'border-gray-700':'border-gray-100'}`}>
+          <h2 className={`font-semibold text-lg ${dk?'text-white':'text-gray-900'}`}>{title}</h2>
+          <button onClick={onClose} className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${dk?'hover:bg-gray-700 text-gray-400 hover:text-white':'hover:bg-gray-100 text-gray-400 hover:text-gray-600'}`}>✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5">{children}</div>
       </div>
@@ -2093,7 +2093,7 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
       <RequirementModal open={showAdd} onClose={()=>setShowAdd(false)} onSave={addReq} plants={plants} users={users} dk={dk} categories={cats} />
       <RequirementModal open={!!editReq} onClose={()=>setEditReq(null)} onSave={saveEdit} initial={editReq} plants={plants} users={users} dk={dk} categories={cats} />
 
-      <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide>
+      <Modal open={!!viewReq} onClose={()=>setViewReq(null)} title="Requirement Details" wide dk={dk}>
         {viewReq && (() => {
           const plant    = plants.find(p=>p.id===viewReq.plantId);
           const assignedIds = Array.isArray(viewReq.assignedTo) ? viewReq.assignedTo : (viewReq.assignedTo ? [viewReq.assignedTo] : []);
@@ -2107,12 +2107,12 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
                 <Badge label={viewReq.category} color="#6366f1" />
                 <Badge label={`L${viewReq.escalationLevel} Escalation`} color="#8b5cf6" />
               </div>
-              <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{viewReq.description}</p>
+              <p className={`leading-relaxed ${dk?'text-gray-300':'text-gray-700'}`}>{viewReq.description}</p>
               <div className="grid grid-cols-2 gap-4">
                 {[['Plant',plant?.name],['State',plant?.state],['Assigned To',assigneeStr],['Due Date',formatDate(viewReq.dueDate)],['Completion Date',viewReq.completionDate?formatDate(viewReq.completionDate):'—'],['Reminder',viewReq.reminderFrequency]].map(([l,v])=>(
                   <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
                     <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${sub}`}>{l}</p>
-                    <p className="font-medium text-gray-800 dark:text-white">{v||'—'}</p>
+                    <p className={`font-medium ${dk?'text-white':'text-gray-800'}`}>{v||'—'}</p>
                   </div>
                 ))}
               </div>
@@ -2170,11 +2170,11 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
               )}
               {viewReq.evidence?.length > 0 && (
                 <div>
-                  <p className="font-semibold mb-2">📎 Evidence</p>
+                  <p className={`font-semibold mb-2 ${dk?'text-white':'text-gray-800'}`}>📎 Evidence</p>
                   {viewReq.evidence.map(e=>(
                     <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
                       <span className="text-xl">📄</span>
-                      <div><p className="text-sm font-medium">{e.name}</p><p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
+                      <div><p className={`text-sm font-medium ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p><p className={`text-xs ${sub}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
                     </div>
                   ))}
                 </div>
@@ -4433,7 +4433,7 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
           <StatCard dk={dk} label="Overdue"     value={myReqs.filter(r=>r.status==='Overdue').length}     icon="🚨" color="bg-red-100 text-red-600" sub="Action needed" />
         </div>
 
-        <Modal open={!!selReq} onClose={()=>setSelReq(null)} title={selReq?.title} wide>
+        <Modal open={!!selReq} onClose={()=>setSelReq(null)} title={selReq?.title} wide dk={dk}>
           {selReq && (
             <div className="space-y-4 text-sm">
               <div className="flex flex-wrap gap-2">
@@ -4457,7 +4457,7 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
                 <div className="flex flex-wrap gap-2">
                   {STATUSES.map(s=>(
                     <button key={s} onClick={()=>updateStatus(selReq.id,s)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all ${selReq.status===s?'border-transparent text-white':'border-gray-200 dark:border-gray-600'}`}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all ${selReq.status===s?'border-transparent text-white':dk?'border-gray-600':'border-gray-200'}`}
                       style={selReq.status===s?{background:STATUS_CLR[s]}:{color:STATUS_CLR[s]}}>
                       {s}
                     </button>
