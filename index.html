@@ -301,7 +301,7 @@ function downloadEvidence(ev) {
 }
 
 /* ─── NOTIFICATION BELL ─── */
-function NotificationBell({ dk, requirements, role }) {
+function NotificationBell({ dk, requirements, role, onNotifClick }) {
   const [open, setOpen] = React.useState(false);
   const [seen, setSeen] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('notif_seen') || '[]'); } catch { return []; }
@@ -313,10 +313,10 @@ function NotificationBell({ dk, requirements, role }) {
     const list = [];
     requirements.forEach(r => {
       if (r.status === 'Overdue') {
-        list.push({ id: `overdue-${r.id}`, type: 'overdue', title: r.title, plant: r.plantId, ts: r.dueDate, msg: `Overdue since ${r.dueDate}` });
+        list.push({ id: `overdue-${r.id}`, type: 'overdue', reqId: r.id, title: r.title, plant: r.plantId, ts: r.dueDate, msg: `Overdue since ${r.dueDate}` });
       }
       (r.evidence || []).forEach(ev => {
-        list.push({ id: `ev-${ev.id}`, type: 'evidence', title: r.title, plant: r.plantId, ts: ev.uploadedAt, msg: `📎 Evidence uploaded: ${ev.name}` });
+        list.push({ id: `ev-${ev.id}`, type: 'evidence', reqId: r.id, title: r.title, plant: r.plantId, ts: ev.uploadedAt, msg: `📎 Evidence uploaded: ${ev.name}` });
       });
     });
     // Sort newest first
@@ -381,7 +381,20 @@ function NotificationBell({ dk, requirements, role }) {
                 const isUnread = !seen.includes(n.id);
                 return (
                   <div key={n.id}
-                    className={`px-4 py-3 transition-colors cursor-default ${isUnread ? (dk ? 'bg-indigo-900/20' : 'bg-indigo-50/60') : ''} ${dk ? 'hover:bg-gray-700/50' : 'hover:bg-gray-50'}`}>
+                    onClick={() => {
+                      // Mark this notification as read
+                      if (isUnread) {
+                        const updated = [...seen, n.id];
+                        localStorage.setItem('notif_seen', JSON.stringify(updated));
+                        setSeen(updated);
+                      }
+                      // Navigate to the requirement
+                      if (onNotifClick && n.reqId) {
+                        onNotifClick(n.reqId);
+                        setOpen(false);
+                      }
+                    }}
+                    className={`px-4 py-3 transition-colors ${onNotifClick ? 'cursor-pointer' : 'cursor-default'} ${isUnread ? (dk ? 'bg-indigo-900/20' : 'bg-indigo-50/60') : ''} ${dk ? 'hover:bg-gray-700/50' : 'hover:bg-gray-50'}`}>
                     <div className="flex items-start gap-2">
                       <span className="text-base mt-0.5 flex-shrink-0">{typeIcon[n.type]}</span>
                       <div className="flex-1 min-w-0">
@@ -389,7 +402,10 @@ function NotificationBell({ dk, requirements, role }) {
                         <p className={`text-xs mt-0.5 ${dk ? 'text-gray-300' : 'text-gray-600'}`}>{n.msg}</p>
                         <p className={`text-[10px] mt-0.5 ${dk ? 'text-gray-500' : 'text-gray-400'}`}>{n.ts ? new Date(n.ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</p>
                       </div>
-                      {isUnread && <span className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0 mt-1.5"></span>}
+                      <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                        {isUnread && <span className="w-2 h-2 rounded-full bg-indigo-500"></span>}
+                        {onNotifClick && <span className="text-gray-300 dark:text-gray-600 text-xs">›</span>}
+                      </div>
                     </div>
                   </div>
                 );
@@ -403,7 +419,7 @@ function NotificationBell({ dk, requirements, role }) {
 }
 
 /* ─── APP SHELL ─── */
-function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage, children, role, logout, requirements }) {
+function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage, children, role, logout, requirements, onNotifClick }) {
   const [collapsed, setCollapsed] = useState(false);
   const roleTag = { admin:'Administrator', top_management:'Top Management', plant_head:'Plant Head', user:'Team Member' }[role];
   const roleBg  = { admin:'bg-indigo-100 text-indigo-700', top_management:'bg-purple-100 text-purple-700', plant_head:'bg-teal-100 text-teal-700', user:'bg-green-100 text-green-700' }[role];
@@ -470,7 +486,7 @@ function AppShell({ dk, toggleTheme, currentUser, nav, activePage, setActivePage
             <FirebaseStatusBadge />
             {/* Notification Bell — admin & top management only */}
             {(role === 'admin' || role === 'top_management') && requirements && (
-              <NotificationBell dk={dk} requirements={requirements} role={role} />
+              <NotificationBell dk={dk} requirements={requirements} role={role} onNotifClick={onNotifClick} />
             )}
             <button onClick={toggleTheme} className={`p-2 rounded-lg transition-colors ${dk?'text-yellow-400 hover:bg-gray-700':'text-slate-600 hover:bg-gray-100'}`} title="Toggle Theme">
               {dk?'☀️':'🌙'}
@@ -623,10 +639,21 @@ function LoginPage({ login }) {
 /* ═══════════════════════════════════════════
    ADMIN – OVERVIEW
 ═══════════════════════════════════════════ */
-function AdminOverview({ dk, plants, users, requirements, categories: catsProp }) {
+function AdminOverview({ dk, plants, users, requirements, categories: catsProp, openReqId, onNotifReqOpened }) {
   const cats = catsProp || CATEGORIES;
   const [selPlant, setSelPlant] = useState('');
   const [drillModal, setDrillModal] = useState(null);
+
+  // Auto-open requirement from notification bell
+  React.useEffect(() => {
+    if (openReqId) {
+      const req = requirements.find(r => r.id === openReqId);
+      if (req) {
+        setDrillModal({ title: req.title, reqs: [req], singleReq: req });
+        if (onNotifReqOpened) onNotifReqOpened();
+      }
+    }
+  }, [openReqId]);
 
   const scopedReqs = selPlant ? requirements.filter(r=>r.plantId===selPlant) : requirements;
   const total     = scopedReqs.length;
@@ -666,12 +693,77 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp }
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
               <div>
                 <h2 className="font-semibold text-lg text-gray-900 dark:text-white">{drillModal.title}</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{drillModal.reqs.length} requirement{drillModal.reqs.length!==1?'s':''}</p>
+                {!drillModal.singleReq && <p className="text-xs text-gray-400 mt-0.5">{drillModal.reqs.length} requirement{drillModal.reqs.length!==1?'s':''}</p>}
               </div>
               <button onClick={closeDrill} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 transition-colors">✕</button>
             </div>
             <div className="overflow-y-auto flex-1 px-6 py-5">
-              {drillModal.reqs.length === 0 ? (
+              {/* Single requirement full-detail view (from notification click) */}
+              {drillModal.singleReq ? (() => {
+                const req = drillModal.singleReq;
+                const plant = plants.find(p=>p.id===req.plantId);
+                const assignedIds = Array.isArray(req.assignedTo) ? req.assignedTo : (req.assignedTo ? [req.assignedTo] : []);
+                const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
+                const dl = daysLeft(req.dueDate);
+                const sub2 = dk?'text-gray-400':'text-gray-500';
+                return (
+                  <div className="space-y-4 text-sm">
+                    <div className="flex flex-wrap gap-2">
+                      <Badge label={req.status}   color={STATUS_CLR[req.status]} />
+                      <Badge label={req.priority} color={PRIORITY_CLR[req.priority]} />
+                      <Badge label={req.category} color="#6366f1" />
+                      <Badge label={`L${req.escalationLevel} Escalation`} color="#8b5cf6" />
+                    </div>
+                    <p className={`leading-relaxed ${dk?'text-gray-300':'text-gray-700'}`}>{req.description}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[['🏭 Plant',plant?.name||'—'],['📍 State',plant?.state||'—'],['👤 Assigned To',assignees.length>0?assignees.map(a=>a.name).join(', '):'Unassigned'],['📅 Due Date',formatDate(req.dueDate)],['⌛ Days Left',dl<0?`${Math.abs(dl)}d overdue`:dl===0?'Today':`${dl}d`],['🔔 Reminder',req.reminderFrequency]].map(([l,v])=>(
+                        <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                          <p className={`text-xs uppercase tracking-wide font-semibold mb-0.5 ${sub2}`}>{l}</p>
+                          <p className={`font-medium text-xs ${dk?'text-white':'text-gray-800'}`}>{v||'—'}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {req.applicableRule && (
+                      <div className={`rounded-xl border p-4 ${dk?'bg-indigo-900/20 border-indigo-700/40':'bg-indigo-50 border-indigo-200'}`}>
+                        <p className="text-xs font-bold uppercase tracking-widest text-indigo-500 mb-2">⚖️ Legal &amp; Regulatory</p>
+                        <p className={`text-xs font-semibold mb-0.5 ${dk?'text-indigo-300':'text-indigo-600'}`}>Applicable Rule</p>
+                        <p className={`text-sm ${dk?'text-white':'text-gray-800'}`}>{req.applicableRule}</p>
+                        {req.legalClause && <><p className={`text-xs font-semibold mt-2 mb-0.5 ${dk?'text-indigo-300':'text-indigo-600'}`}>Legal Clause</p><p className={`text-sm leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{req.legalClause}</p></>}
+                      </div>
+                    )}
+                    {req.evidence?.length > 0 && (
+                      <div>
+                        <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${sub2}`}>📎 Evidence ({req.evidence.length})</p>
+                        {req.evidence.map(e=>(
+                          <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                            <span className="text-xl">{(e.mimeType||'').startsWith('image/')?'🖼️':e.name?.toLowerCase().endsWith('.pdf')?'📑':'📄'}</span>
+                            <div className="flex-1"><p className={`text-xs font-medium ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p><p className={`text-xs ${sub2}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
+                            <button onClick={()=>{ const url=e.storageUrl||e.dataUrl; if(url) window.open(url,'_blank'); }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors">
+                              ⬇️
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {req.comments?.length > 0 && (
+                      <div>
+                        <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${sub2}`}>💬 Comments ({req.comments.length})</p>
+                        {req.comments.map(c=>{ const u=users.find(x=>x.id===c.userId); return (
+                          <div key={c.id} className={`p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(u?.name||'?')}</div>
+                              <span className="text-xs font-medium">{u?.name||'Unknown'}</span>
+                              <span className={`text-xs ${sub2}`}>{formatDate(c.createdAt)}</span>
+                            </div>
+                            <p className={`text-xs ${sub2}`}>{c.text}</p>
+                          </div>
+                        );})}
+                      </div>
+                    )}
+                  </div>
+                );
+              })() : drillModal.reqs.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="text-4xl mb-3">🎉</p>
                   <p className="font-semibold text-gray-500">No requirements in this group</p>
@@ -2069,7 +2161,7 @@ function RequirementModal({ open, onClose, onSave, initial, plants, users, dk, c
 /* ═══════════════════════════════════════════
    ADMIN – REQUIREMENTS
 ═══════════════════════════════════════════ */
-function AdminRequirements({ dk, plants, users, requirements, updateRequirements, categories: catsProp }) {
+function AdminRequirements({ dk, plants, users, requirements, updateRequirements, categories: catsProp, openReqId, onNotifReqOpened }) {
   const cats = catsProp || CATEGORIES;
   const [filters,      setFilters]      = useState({ plant:'', status:'', priority:'', search:'' });
   const [showAdd,      setShowAdd]      = useState(false);
@@ -2099,6 +2191,14 @@ function AdminRequirements({ dk, plants, users, requirements, updateRequirements
     a.click();
     document.body.removeChild(a);
   };
+
+  // Auto-open requirement when triggered from notification bell
+  React.useEffect(() => {
+    if (openReqId) {
+      const req = requirements.find(r => r.id === openReqId);
+      if (req) { setViewReq(req); if (onNotifReqOpened) onNotifReqOpened(); }
+    }
+  }, [openReqId]);
 
   const filtered = requirements.filter(r => {
     if (filters.plant    && r.plantId  !== filters.plant)    return false;
@@ -4352,11 +4452,23 @@ function AdminDashboard({ dk, toggleTheme, currentUser, plants, users, requireme
     settings:     <AdminSettings dk={dk} />,
   };
 
+  // Notification click: navigate to requirements page and open the requirement
+  const [notifReqId, setNotifReqId] = React.useState(null);
+  const handleNotifClick = (reqId) => {
+    setActivePage('requirements');
+    setNotifReqId(reqId);
+  };
+
+  const pagesWithNotif = {
+    ...pages,
+    requirements: <AdminRequirements dk={dk} plants={plants} users={users} requirements={requirements} updateRequirements={updateRequirements} categories={categories} openReqId={notifReqId} onNotifReqOpened={()=>setNotifReqId(null)} />,
+  };
+
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
       activePage={activePage} setActivePage={setActivePage} role="admin" logout={logout}
-      requirements={requirements}>
-      {pages[activePage]}
+      requirements={requirements} onNotifClick={handleNotifClick}>
+      {pagesWithNotif[activePage] || pages[activePage]}
     </AppShell>
   );
 }
@@ -4372,15 +4484,15 @@ function TopManagementDashboard({ dk, toggleTheme, currentUser, plants, users, r
     { id:'overview', icon:'📊', label:'Overview', badge: overdueCount > 0 ? overdueCount : 0 },
   ];
 
-  const pages = {
-    overview: <AdminOverview dk={dk} plants={plants} users={users} requirements={requirements} />,
-  };
+  const [notifReqId, setNotifReqId] = React.useState(null);
+  const handleNotifClick = (reqId) => { setNotifReqId(reqId); };
 
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
       activePage={activePage} setActivePage={setActivePage} role="top_management" logout={logout}
-      requirements={requirements}>
-      {pages[activePage]}
+      requirements={requirements} onNotifClick={handleNotifClick}>
+      <AdminOverview dk={dk} plants={plants} users={users} requirements={requirements}
+        openReqId={notifReqId} onNotifReqOpened={()=>setNotifReqId(null)} />
     </AppShell>
   );
 }
@@ -4390,9 +4502,25 @@ function TopManagementDashboard({ dk, toggleTheme, currentUser, plants, users, r
 ═══════════════════════════════════════════ */
 function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updateRequirements, logout }) {
   const [activePage, setActivePage] = useState('overview');
+  const [selPHReq,   setSelPHReq]   = useState(null);
+  const [notifReqId, setNotifReqId] = React.useState(null);
   const myPlant   = plants.find(p=>p.id===currentUser.plantId);
   const myReqs    = requirements.filter(r=>r.plantId===currentUser.plantId);
   const overdueCount = myReqs.filter(r=>r.status==='Overdue').length;
+
+  // Notification click: navigate to requirements tab and open the requirement
+  const handleNotifClick = (reqId) => {
+    setActivePage('requirements');
+    setNotifReqId(reqId);
+  };
+
+  // Auto-open from notification
+  React.useEffect(() => {
+    if (notifReqId) {
+      const req = myReqs.find(r => r.id === notifReqId);
+      if (req) { setSelPHReq(req); setNotifReqId(null); }
+    }
+  }, [notifReqId, activePage]);
 
   const nav = [
     { id:'overview',     icon:'📊', label:'Plant Overview' },
@@ -4497,7 +4625,8 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
                 const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
                 const dl=daysLeft(r.dueDate);
                 return (
-                  <tr key={r.id} className={dk?'hover:bg-gray-700/40':'hover:bg-slate-50'}>
+                  <tr key={r.id} onClick={()=>setSelPHReq(r)}
+                    className={`cursor-pointer ${dk?'hover:bg-gray-700/40':'hover:bg-indigo-50/60'} transition-colors`}>
                     <td className="px-4 py-3 font-medium max-w-[220px] truncate">{r.title}</td>
                     <td className={`px-4 py-3 text-xs ${sub}`}>{r.category}</td>
                     <td className="px-4 py-3 text-xs">{assignees.length>0?<div className="flex items-center gap-1 flex-wrap">{assignees.slice(0,3).map(a=><div key={a.id} className="flex items-center gap-1" title={a.name}><div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(a.name)}</div>{assignees.length===1&&<span>{a.name}</span>}</div>)}{assignees.length>3&&<span className={sub}>+{assignees.length-3}</span>}{assignees.length>1&&<span className={sub}>{assignees.length} users</span>}</div>:<span className="text-red-400">Unassigned</span>}</td>
@@ -4541,9 +4670,78 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
   );
 
   const pages = { overview:<Overview/>, requirements:<PHRequirements/>, team:<Team/> };
+
+  // Requirement detail modal for Plant Head (view only)
+  const PHModal = () => {
+    if (!selPHReq) return null;
+    const plant = plants.find(p=>p.id===selPHReq.plantId);
+    const assignedIds = Array.isArray(selPHReq.assignedTo) ? selPHReq.assignedTo : (selPHReq.assignedTo ? [selPHReq.assignedTo] : []);
+    const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean);
+    const dl = daysLeft(selPHReq.dueDate);
+    const sub2 = dk?'text-gray-400':'text-gray-500';
+    return (
+      <Modal open={!!selPHReq} onClose={()=>setSelPHReq(null)} title={selPHReq.title} wide dk={dk}>
+        <div className="space-y-4 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <Badge label={selPHReq.status}   color={STATUS_CLR[selPHReq.status]} />
+            <Badge label={selPHReq.priority} color={PRIORITY_CLR[selPHReq.priority]} />
+            <Badge label={selPHReq.category} color="#6366f1" />
+            <Badge label={`L${selPHReq.escalationLevel} Escalation`} color="#8b5cf6" />
+          </div>
+          <p className={`leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{selPHReq.description}</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['📅 Due Date',formatDate(selPHReq.dueDate)],['⌛ Days Left',dl<0?`${Math.abs(dl)}d overdue`:dl===0?'Today':`${dl}d`],['🔔 Reminder',selPHReq.reminderFrequency],['🏭 Plant',plant?.name||'—'],['📍 State',plant?.state||'—'],['👤 Assigned To',assignees.length>0?assignees.map(a=>a.name).join(', '):'Unassigned']].map(([l,v])=>(
+              <div key={l} className={`p-3 rounded-xl ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                <p className={`text-xs mb-0.5 ${sub2}`}>{l}</p>
+                <p className={`font-medium text-xs ${dk?'text-gray-100':'text-gray-800'}`}>{v}</p>
+              </div>
+            ))}
+          </div>
+          {(selPHReq.applicableRule||selPHReq.legalClause) && (
+            <div className={`rounded-xl border p-4 space-y-2 ${dk?'bg-indigo-900/20 border-indigo-700/40':'bg-indigo-50 border-indigo-200'}`}>
+              <p className="text-xs font-bold uppercase tracking-widest text-indigo-500">⚖️ Legal &amp; Regulatory</p>
+              {selPHReq.applicableRule && <><p className={`text-xs font-semibold ${dk?'text-indigo-300':'text-indigo-600'}`}>Applicable Rule</p><p className={`text-sm ${dk?'text-white':'text-gray-800'}`}>{selPHReq.applicableRule}</p></>}
+              {selPHReq.legalClause && <><p className={`text-xs font-semibold ${dk?'text-indigo-300':'text-indigo-600'}`}>Legal Clause</p><p className={`text-sm leading-relaxed ${dk?'text-gray-200':'text-gray-700'}`}>{selPHReq.legalClause}</p></>}
+            </div>
+          )}
+          {selPHReq.evidence?.length > 0 && (
+            <div>
+              <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${sub2}`}>📎 Evidence ({selPHReq.evidence.length})</p>
+              {selPHReq.evidence.map(e=>(
+                <div key={e.id} className={`flex items-center gap-3 p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                  <span className="text-xl">{(e.mimeType||'').startsWith('image/')?'🖼️':e.name?.toLowerCase().endsWith('.pdf')?'📑':'📄'}</span>
+                  <div className="flex-1 min-w-0"><p className={`text-sm font-medium truncate ${dk?'text-gray-100':'text-gray-800'}`}>{e.name}</p><p className={`text-xs ${sub2}`}>{e.size} · {formatDate(e.uploadedAt)}</p></div>
+                  <button onClick={()=>{ const url=e.storageUrl||e.dataUrl; if(url) window.open(url,'_blank'); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors flex-shrink-0">⬇️</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {selPHReq.comments?.length > 0 && (
+            <div>
+              <p className={`font-semibold mb-2 text-xs uppercase tracking-wide ${sub2}`}>💬 Comments ({selPHReq.comments.length})</p>
+              {selPHReq.comments.map(c=>{ const u=users.find(x=>x.id===c.userId); return (
+                <div key={c.id} className={`p-3 rounded-xl mb-2 ${dk?'bg-gray-700':'bg-gray-50'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs">{initials(u?.name||'?')}</div>
+                    <span className="text-xs font-medium">{u?.name||'Unknown'}</span>
+                    <span className={`text-xs ${sub2}`}>{formatDate(c.createdAt)}</span>
+                  </div>
+                  <p className={`text-xs ${sub2}`}>{c.text}</p>
+                </div>
+              );})}
+            </div>
+          )}
+        </div>
+      </Modal>
+    );
+  };
+
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
-      activePage={activePage} setActivePage={setActivePage} role="plant_head" logout={logout}>
+      activePage={activePage} setActivePage={setActivePage} role="plant_head" logout={logout}
+      requirements={requirements} onNotifClick={handleNotifClick}>
+      <PHModal />
       {pages[activePage]}
     </AppShell>
   );
@@ -4554,9 +4752,16 @@ function PlantHeadDashboard({ dk, toggleTheme, currentUser, plants, users, requi
 ═══════════════════════════════════════════ */
 function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requirements, updateRequirements, logout }) {
   const [activePage, setActivePage] = useState('tasks');
+  const [notifReqId, setNotifReqId] = React.useState(null);
   const myReqs    = requirements.filter(r=>(Array.isArray(r.assignedTo)?r.assignedTo:(r.assignedTo?[r.assignedTo]:[])).includes(currentUser.id));
   const myPlant   = plants.find(p=>p.id===currentUser.plantId);
   const overdueCount = myReqs.filter(r=>r.status==='Overdue').length;
+
+  // Notification click: switch to tasks tab and open the requirement modal
+  const handleNotifClick = (reqId) => {
+    setActivePage('tasks');
+    setNotifReqId(reqId);
+  };
 
   const nav = [
     { id:'tasks',   icon:'📋', label:'My Tasks', badge:overdueCount },
@@ -4570,6 +4775,15 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
   const [comment, setComment] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
+
+  // Auto-open requirement from notification bell
+  React.useEffect(() => {
+    if (notifReqId) {
+      // Check own tasks first, then fall back to any requirement
+      const req = myReqs.find(r => r.id === notifReqId) || requirements.find(r => r.id === notifReqId);
+      if (req) { setSelReq(req); setNotifReqId(null); }
+    }
+  }, [notifReqId, activePage]);
 
   const updateStatus = (id, status) => {
     const req = requirements.find(r => r.id === id);
@@ -4865,7 +5079,8 @@ function UserDashboard({ dk, toggleTheme, currentUser, plants, users, requiremen
   const pages = { tasks:<Tasks/>, profile:<Profile/> };
   return (
     <AppShell dk={dk} toggleTheme={toggleTheme} currentUser={currentUser} nav={nav}
-      activePage={activePage} setActivePage={setActivePage} role="user" logout={logout}>
+      activePage={activePage} setActivePage={setActivePage} role="user" logout={logout}
+      requirements={requirements} onNotifClick={handleNotifClick}>
       <TaskModal />
       {pages[activePage]}
     </AppShell>
