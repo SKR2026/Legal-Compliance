@@ -643,6 +643,138 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp, 
   const cats = catsProp || CATEGORIES;
   const [selPlant, setSelPlant] = useState('');
   const [drillModal, setDrillModal] = useState(null);
+  const [exportLoading, setExportLoading] = useState('');
+
+  const getExportData = () => {
+    const scopeReqs = selPlant ? requirements.filter(r=>r.plantId===selPlant) : requirements;
+    return scopeReqs.map(r => {
+      const plant = plants.find(p=>p.id===r.plantId);
+      const assignedIds = Array.isArray(r.assignedTo) ? r.assignedTo : (r.assignedTo ? [r.assignedTo] : []);
+      const assignees = assignedIds.map(id=>users.find(u=>u.id===id)).filter(Boolean).map(u=>u.name).join('; ');
+      return {
+        'ID': r.id,
+        'Title': r.title,
+        'Category': r.category,
+        'Priority': r.priority,
+        'Status': r.status,
+        'Plant': plant?.name || '—',
+        'State': plant?.state || '—',
+        'Assigned To': assignees || 'Unassigned',
+        'Due Date': r.dueDate || '—',
+        'Reminder Frequency': r.reminderFrequency || '—',
+        'Escalation Level': r.escalationLevel ? `Level ${r.escalationLevel}` : '—',
+        'Applicable Rule': r.applicableRule || '—',
+        'Completion Date': r.completionDate || '—',
+        'Created At': r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN') : '—',
+        'Description': r.description || '',
+      };
+    });
+  };
+
+  const exportCSV = () => {
+    setExportLoading('csv');
+    try {
+      const rows = getExportData();
+      if (!rows.length) { alert('No data to export.'); setExportLoading(''); return; }
+      const headers = Object.keys(rows[0]);
+      const escape = v => `"${String(v).replace(/"/g,'""')}"`;
+      const csv = [headers.map(escape).join(','), ...rows.map(r => headers.map(h=>escape(r[h]||'')).join(','))].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const scopeLabel = selPlant ? plants.find(p=>p.id===selPlant)?.name?.replace(/\s+/g,'_') : 'All_Plants';
+      a.href = url;
+      a.download = `Legal_Compliance_${scopeLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch(e) { console.error(e); }
+    setTimeout(() => setExportLoading(''), 800);
+  };
+
+  const exportPDF = () => {
+    setExportLoading('pdf');
+    try {
+      const rows = getExportData();
+      const scopeLabel = selPlant ? plants.find(p=>p.id===selPlant)?.name : 'All Plants';
+      const total = rows.length;
+      const completed = rows.filter(r=>r['Status']==='Completed').length;
+      const overdue = rows.filter(r=>r['Status']==='Overdue').length;
+      const pending = rows.filter(r=>r['Status']==='Pending').length;
+      const inProg = rows.filter(r=>r['Status']==='In Progress').length;
+      const compliance = total ? Math.round(completed/total*100) : 0;
+      const now = new Date().toLocaleDateString('en-IN',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+      const statusColor = { Completed:'#22c55e', 'In Progress':'#6366f1', Pending:'#f59e0b', Overdue:'#ef4444' };
+      const priorityColor = { Critical:'#ef4444', High:'#f97316', Medium:'#f59e0b', Low:'#22c55e' };
+
+      const tableRows = rows.map(r => `
+        <tr>
+          <td>${r['Title']}</td>
+          <td>${r['Category']}</td>
+          <td><span class="badge" style="background:${priorityColor[r['Priority']]||'#888'}22;color:${priorityColor[r['Priority']]||'#888'}">${r['Priority']}</span></td>
+          <td><span class="badge" style="background:${statusColor[r['Status']]||'#888'}22;color:${statusColor[r['Status']]||'#888'}">${r['Status']}</span></td>
+          <td>${r['Plant']}</td>
+          <td>${r['Assigned To']}</td>
+          <td>${r['Due Date']}</td>
+          <td>${r['Escalation Level']}</td>
+        </tr>`).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+        <title>Legal Compliance Report</title>
+        <style>
+          *{box-sizing:border-box;margin:0;padding:0}
+          body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#111;background:#fff;padding:32px}
+          .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #6366f1;padding-bottom:16px;margin-bottom:24px}
+          .header h1{font-size:22px;font-weight:800;color:#6366f1;letter-spacing:-0.5px}
+          .header .meta{text-align:right;color:#555;font-size:11px;line-height:1.7}
+          .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
+          .stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center}
+          .stat .val{font-size:22px;font-weight:800;color:#6366f1}
+          .stat .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-top:2px}
+          .stat.green .val{color:#22c55e} .stat.red .val{color:#ef4444} .stat.amber .val{color:#f59e0b} .stat.blue .val{color:#3b82f6}
+          table{width:100%;border-collapse:collapse;margin-top:8px}
+          th{background:#6366f1;color:#fff;padding:9px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+          td{padding:8px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;vertical-align:top}
+          tr:nth-child(even) td{background:#f8fafc}
+          .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
+          .footer{margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center}
+          @media print{body{padding:16px}@page{margin:15mm}}
+        </style></head><body>
+        <div class="header">
+          <div>
+            <h1>⚖️ Legal Compliance Report</h1>
+            <div style="color:#6366f1;font-size:13px;font-weight:600;margin-top:4px">Polyplastics — ${scopeLabel}</div>
+          </div>
+          <div class="meta">
+            <div><strong>Generated:</strong> ${now}</div>
+            <div><strong>Scope:</strong> ${scopeLabel}</div>
+            <div><strong>Total Records:</strong> ${total}</div>
+          </div>
+        </div>
+        <div class="summary">
+          <div class="stat"><div class="val">${total}</div><div class="lbl">Total</div></div>
+          <div class="stat green"><div class="val">${compliance}%</div><div class="lbl">Compliance</div></div>
+          <div class="stat green"><div class="val">${completed}</div><div class="lbl">Completed</div></div>
+          <div class="stat blue"><div class="val">${inProg}</div><div class="lbl">In Progress</div></div>
+          <div class="stat amber"><div class="val">${pending}</div><div class="lbl">Pending</div></div>
+        </div>
+        ${overdue > 0 ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:16px;color:#dc2626;font-size:11px;font-weight:600">🚨 ${overdue} Overdue item${overdue>1?'s':''} require immediate attention</div>` : ''}
+        <table>
+          <thead><tr><th>Requirement</th><th>Category</th><th>Priority</th><th>Status</th><th>Plant</th><th>Assigned To</th><th>Due Date</th><th>Escalation</th></tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+        <div class="footer">Polyplastics Legal Compliance Management System · Confidential · Generated on ${new Date().toLocaleString('en-IN')}</div>
+        <script>window.onload=()=>{window.print();}<\/script>
+        </body></html>`;
+
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (!win) { alert('Please allow pop-ups to export PDF. Use browser Print → Save as PDF.'); }
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch(e) { console.error(e); }
+    setTimeout(() => setExportLoading(''), 800);
+  };
 
   // Auto-open requirement from notification bell
   React.useEffect(() => {
@@ -816,6 +948,33 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp, 
               {p.name}
             </button>
           ))}
+          {/* ── Export Buttons ── */}
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={exportCSV}
+              disabled={exportLoading==='csv'}
+              title="Export current view as CSV spreadsheet"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm
+                ${exportLoading==='csv'
+                  ? 'opacity-60 cursor-not-allowed bg-emerald-600 text-white border-emerald-600'
+                  : dk
+                    ? 'bg-emerald-800 hover:bg-emerald-700 text-emerald-200 border-emerald-700'
+                    : 'bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 border-emerald-300'}`}>
+              {exportLoading==='csv' ? '⏳' : '⬇️'} Export CSV
+            </button>
+            <button
+              onClick={exportPDF}
+              disabled={exportLoading==='pdf'}
+              title="Export current view as a printable PDF report"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all shadow-sm
+                ${exportLoading==='pdf'
+                  ? 'opacity-60 cursor-not-allowed bg-rose-600 text-white border-rose-600'
+                  : dk
+                    ? 'bg-rose-900 hover:bg-rose-800 text-rose-200 border-rose-700'
+                    : 'bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border-rose-300'}`}>
+              {exportLoading==='pdf' ? '⏳' : '🖨️'} Export PDF
+            </button>
+          </div>
         </div>
         {selPlant && (
           <p className="text-xs text-indigo-400 mt-2 font-medium">
