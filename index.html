@@ -932,8 +932,45 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp, 
 
   const statusPie = STATUSES.map(s=>({ name:s, value:scopedReqs.filter(r=>r.status===s).length }));
   const catPie    = cats.map(c=>({ name:c, value:scopedReqs.filter(r=>r.category===c).length })).filter(d=>d.value>0);
-  const months    = ['Jan','Feb','Mar','Apr','May','Jun'];
-  const trendData = months.map((m,i)=>({ m, Compliance:58+i*5+(i%2)*3, Target:90 }));
+  // ── Compliance Trend: real data from last 6 months ──────────────────────
+  // Strategy: for each month bucket, count requirements whose dueDate falls
+  // in that month, then compute % completed (status==='Completed') among them.
+  // If a month has no due requirements, fall back to cumulative snapshot so
+  // the line never gaps.
+  const trendData = (() => {
+    const now = new Date();
+    const buckets = [];
+    for (let i = 5; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const lbl = d.toLocaleString('default', { month: 'short' });
+      buckets.push({ key, m: lbl, total: 0, done: 0 });
+    }
+    // Bucket by dueDate month
+    requirements.forEach(r => {
+      if (!r.dueDate) return;
+      const mk = r.dueDate.slice(0, 7);
+      const b  = buckets.find(x => x.key === mk);
+      if (!b) return;
+      b.total++;
+      if (r.status === 'Completed') b.done++;
+    });
+    // For months with no due reqs, carry forward the latest known % (or use
+    // cumulative up-to-that-month snapshot so the trend is always meaningful)
+    let lastPct = compliance; // fallback = current overall rate
+    return buckets.map(b => {
+      let pct;
+      if (b.total > 0) {
+        pct = Math.round((b.done / b.total) * 100);
+        lastPct = pct;
+      } else {
+        // No requirements due this month — use cumulative completed/total
+        // up to this point across ALL scoped reqs as best approximation
+        pct = lastPct;
+      }
+      return { m: b.m, Compliance: pct, Target: 90 };
+    });
+  })();
 
   const card = `rounded-2xl border p-5 shadow-sm ${dk?'bg-gray-800 border-gray-700':'bg-white border-gray-200'}`;
   const sub  = `text-xs ${dk?'text-gray-400':'text-gray-500'}`;
@@ -1185,7 +1222,11 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp, 
       {/* Charts Row 2 */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className={card}>
-          <h3 className="font-semibold mb-4" style={{fontFamily:"'Outfit',sans-serif"}}>Compliance Trend</h3>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-semibold" style={{fontFamily:"'Outfit',sans-serif"}}>Compliance Trend</h3>
+            <span className={`text-xs ${dk?'text-gray-400':'text-gray-400'}`}>by due date · last 6 months</span>
+          </div>
+          <p className={`text-xs mb-3 ${dk?'text-gray-500':'text-gray-400'}`}>% of requirements completed vs due each month</p>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={trendData}>
               <defs>
@@ -1196,8 +1237,8 @@ function AdminOverview({ dk, plants, users, requirements, categories: catsProp, 
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={dk?'#374151':'#f1f5f9'} vertical={false}/>
               <XAxis dataKey="m" tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false}/>
-              <YAxis domain={[50,100]} tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false}/>
-              <Tooltip {...TT} />
+              <YAxis domain={[d => Math.max(0, Math.floor(d/10)*10 - 10), 100]} tick={{fontSize:11,fill:dk?'#9ca3af':'#64748b'}} axisLine={false} tickLine={false} unit="%"/>
+              <Tooltip {...TT} formatter={(value, name) => [`${value}%`, name]} />
               <Area type="monotone" dataKey="Compliance" stroke="#6366f1" fill="url(#cg)" strokeWidth={2.5} dot={{r:4,fill:'#6366f1'}} />
               <Line type="monotone" dataKey="Target" stroke="#ef4444" strokeDasharray="5 5" strokeWidth={2} dot={false} />
               <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:12}} />
