@@ -5712,11 +5712,16 @@ function LicenseGate({ dk, onValidated }) {
   };
 
   const formatKey = v => {
-    const raw = v.replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+    const raw = v.replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+    const segs = [3,4,4,4];
     const parts = [];
-    for (let i = 0; i < raw.length && parts.join('').length < 16; i += 4)
-      parts.push(raw.slice(i, i+4));
-    return parts.join('-');
+    let pos = 0;
+    for (const len of segs) {
+      if (pos >= raw.length) break;
+      parts.push(raw.slice(pos, pos+len));
+      pos += len;
+    }
+    return parts.join("-");
   };
 
   const handleInput = e => setKeyInput(formatKey(e.target.value));
@@ -5761,15 +5766,15 @@ function LicenseGate({ dk, onValidated }) {
         <div style={{fontSize:12,color:tx3,marginBottom:24,lineHeight:1.6}}>Enter your license key to access the Admin dashboard. Contact your software provider if you don't have one.</div>
 
         <div style={{fontSize:11,color:tx3,marginBottom:16,display:'flex',alignItems:'center',gap:6}}>
-          Format: <code style={{background:dk?'rgba(99,102,241,.15)':'rgba(99,102,241,.1)',color:'#6366f1',padding:'2px 7px',borderRadius:4,fontFamily:'monospace',fontSize:10,letterSpacing:1}}>XXXX-XXXX-XXXX-XXXX</code>
+          Format: <code style={{background:dk?'rgba(99,102,241,.15)':'rgba(99,102,241,.1)',color:'#6366f1',padding:'2px 7px',borderRadius:4,fontFamily:'monospace',fontSize:10,letterSpacing:1}}>XXX-XXXX-XXXX-XXXX</code>
         </div>
 
         <input
           value={keyInput}
           onChange={handleInput}
           onKeyDown={e => e.key==='Enter' && handleActivate()}
-          maxLength={19}
-          placeholder="XXXX-XXXX-XXXX-XXXX"
+          maxLength={18}
+          placeholder="XXX-XXXX-XXXX-XXXX"
           style={{width:'100%',padding:'13px 16px',background:dk?'rgba(30,37,53,0.8)':'#f0f4ff',border:`1.5px solid ${status==='error'?'#ef4444':bord}`,color:tx,borderRadius:10,fontFamily:'monospace',fontSize:15,letterSpacing:2,textTransform:'uppercase',boxSizing:'border-box',marginBottom:10,outline:'none',transition:'border-color .2s'}}
         />
 
