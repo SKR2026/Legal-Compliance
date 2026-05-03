@@ -52,6 +52,7 @@
       storageBucket:     "skr-legal.firebasestorage.app",
       messagingSenderId: "906193634469",
       appId:             "1:906193634469:web:0cca89b8495b283ce7f94c",
+      databaseURL:       "https://skr-legal-default-rtdb.firebaseio.com",
       measurementId:     "G-67NGHMK0QR"
     };
     if (!firebase.apps.length) {
@@ -63,7 +64,7 @@
     window.fbStorage = firebase.storage();
     // Keep anonymous auth session alive across page reloads
     window.fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
-    console.log("✅ Firebase initialized — project: skr-task");
+    console.log("✅ Firebase initialized — project: skr-legal");
     // Help: print the exact redirect URI that must be registered in Azure AD
     // App registrations → Authentication → Single-page application → Redirect URIs
     const _azureRedirectUri = window.location.href.split('?')[0].split('#')[0];
@@ -316,7 +317,7 @@ function FirebaseStatusBadge() {
 
   const cfg = {
     checking:  { dot: 'bg-yellow-400 animate-pulse', text: 'text-yellow-600 dark:text-yellow-300', label: 'Firebase…',   title: 'Connecting to Firebase…' },
-    connected: { dot: 'bg-green-500',                text: 'text-green-600 dark:text-green-400',   label: 'Firebase ✓',  title: 'Firebase connected — skr-task' },
+    connected: { dot: 'bg-green-500',                text: 'text-green-600 dark:text-green-400',   label: 'Firebase ✓',  title: 'Firebase connected — skr-legal' },
     error:     { dot: 'bg-red-500',                  text: 'text-red-600 dark:text-red-400',        label: 'Firebase ✗',  title: 'Firebase connection failed — check Firestore rules' },
   }[status];
 
@@ -3425,9 +3426,9 @@ function AdminSettings({ dk }) {
       emailProvider: 'graph', // 'graph' | 'emailjs' | 'both'
       // Firebase
       fbApiKey: 'AIzaSyCYGV5HpF6-j_HBqix3EA-XFGmT8E698k8',
-      fbAuthDomain: 'skr-task.firebaseapp.com',
-      fbProjectId: 'skr-task',
-      fbStorageBucket: 'skr-task.firebasestorage.app',
+      fbAuthDomain: 'skr-legal.firebaseapp.com',
+      fbProjectId: 'skr-legal',
+      fbStorageBucket: 'skr-legal.firebasestorage.app',
       fbMessagingSenderId: '1011690659933',
       fbAppId: '1:1011690659933:web:f57e43ee0267a475682db4',
       fbMeasurementId: 'G-67NGHMK0QR',
@@ -5659,7 +5660,7 @@ function fbListen(col, cb) {
 
 /* ═══════════════════════════════════════════
    LICENSE VALIDATION  (Admin-only gate)
-   Uses the same Firebase project (skr-task)
+   Uses the same Firebase project (skr-legal)
    Reads from the 'licenses' collection.
 ═══════════════════════════════════════════ */
 async function validateAdminLicense(key) {
@@ -5810,7 +5811,7 @@ function LicenseGate({ dk, onValidated }) {
             <div style={{display:'flex',alignItems:'flex-start',gap:8}}>⚠ {errMsg}</div>
             {errMsg.toLowerCase().includes('access denied') && (
               <div style={{marginTop:8,padding:'7px 10px',background:'rgba(0,0,0,.2)',borderRadius:6,fontSize:11,color:'#fcd34d',fontFamily:'monospace',whiteSpace:'pre-wrap',lineHeight:1.7}}>
-                {`Firestore rules needed for skr-task:
+                {`Firestore rules needed for skr-legal:
 
 match /licenses/{id} {
   allow read: if request.auth != null;
