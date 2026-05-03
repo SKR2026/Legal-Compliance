@@ -5666,6 +5666,8 @@ async function validateAdminLicense(key) {
   if (!key || !key.trim()) return { valid: false, reason: 'NO_KEY' };
   const cleanKey = key.trim().toUpperCase();
   try {
+    // Ensure anonymous auth so Firestore rules (request.auth != null) pass
+    await fbEnsureAuth();
     const snap = await window.db.collection('licenses').doc(cleanKey).get();
     if (!snap.exists) return { valid: false, reason: 'INVALID_KEY' };
     const d = snap.data();
@@ -5705,7 +5707,7 @@ function LicenseGate({ dk, onValidated }) {
     REVOKED:     'This license has been revoked. Contact your administrator.',
     EXPIRED:     'This license has expired. Contact your administrator to renew.',
     OFFLINE:     'Cannot reach the license server. Check your internet connection.',
-    PERMISSION:  'License server access denied. Contact support.',
+    PERMISSION:  'Firebase anonymous auth is disabled. Enable it in Firebase Console → Authentication → Sign-in providers → Anonymous.',
     ERROR:       'An error occurred verifying your license. Try again.',
   };
 
