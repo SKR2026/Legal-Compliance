@@ -303,9 +303,14 @@ function FirebaseStatusBadge() {
     let cancelled = false;
     async function check() {
       try {
+        // Ensure anonymous auth before any Firestore read so rules pass
+        if (!window.fbAuth.currentUser) {
+          await window.fbAuth.signInAnonymously();
+        }
         await window.db.collection('_ping').limit(1).get();
         if (!cancelled) setStatus('connected');
       } catch (e) {
+        console.warn('Firebase status check failed:', e.code, e.message);
         if (!cancelled) setStatus('error');
       }
     }
@@ -3566,11 +3571,14 @@ function AdminSettings({ dk }) {
   const testFirebase = async () => {
     setFbTestStatus('testing');
     try {
-      // Use the globally initialized Firestore (window.db)
+      // Ensure anonymous auth before Firestore read so rules pass
+      if (!window.fbAuth.currentUser) {
+        await window.fbAuth.signInAnonymously();
+      }
       await window.db.collection('_ping').limit(1).get();
       setFbTestStatus('success');
     } catch (err) {
-      console.error('Firebase test failed:', err);
+      console.error('Firebase test failed:', err.code, err.message);
       setFbTestStatus('error');
     }
     setTimeout(() => setFbTestStatus(null), 4000);
@@ -5813,9 +5821,12 @@ function LicenseGate({ dk, onValidated }) {
               <div style={{marginTop:8,padding:'7px 10px',background:'rgba(0,0,0,.2)',borderRadius:6,fontSize:11,color:'#fcd34d',fontFamily:'monospace',whiteSpace:'pre-wrap',lineHeight:1.7}}>
                 {`Firestore rules needed for skr-legal:
 
-match /licenses/{id} {
-  allow read: if request.auth != null;
-  allow write: if request.auth != null;
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
 }`}
               </div>
             )}
