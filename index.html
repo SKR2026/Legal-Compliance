@@ -5658,6 +5658,147 @@ function fbListen(col, cb) {
 }
 
 /* ═══════════════════════════════════════════
+   LICENSE VALIDATION  (Admin-only gate)
+   Uses the same Firebase project (skr-task)
+   Reads from the 'licenses' collection.
+═══════════════════════════════════════════ */
+async function validateAdminLicense(key) {
+  if (!key || !key.trim()) return { valid: false, reason: 'NO_KEY' };
+  const cleanKey = key.trim().toUpperCase();
+  try {
+    const snap = await window.db.collection('licenses').doc(cleanKey).get();
+    if (!snap.exists) return { valid: false, reason: 'INVALID_KEY' };
+    const d = snap.data();
+    if (d._deleted) return { valid: false, reason: 'INVALID_KEY' };
+    if (!d.isActive)  return { valid: false, reason: 'REVOKED' };
+    const now = new Date();
+    let expiry = null;
+    if (d.expiryDate) {
+      expiry = typeof d.expiryDate.toDate === 'function'
+        ? d.expiryDate.toDate()
+        : new Date(d.expiryDate);
+    }
+    if (expiry && now > expiry) return { valid: false, reason: 'EXPIRED', expiry };
+    // bump activation count — non-critical
+    try { await window.db.collection('licenses').doc(cleanKey).update({
+      activationCount: (d.activationCount || 0) + 1,
+      lastValidated: firebase.firestore.FieldValue.serverTimestamp()
+    }); } catch(_) {}
+    return { valid: true, data: d };
+  } catch(e) {
+    if (e.code === 'unavailable' || (e.message && e.message.includes('offline')))
+      return { valid: false, reason: 'OFFLINE' };
+    if (e.code === 'permission-denied')
+      return { valid: false, reason: 'PERMISSION' };
+    return { valid: false, reason: 'ERROR', message: e.message };
+  }
+}
+
+function LicenseGate({ dk, onValidated }) {
+  const [keyInput, setKeyInput]   = React.useState('');
+  const [status,   setStatus]     = React.useState('idle'); // idle|checking|error
+  const [errMsg,   setErrMsg]     = React.useState('');
+
+  const REASON_MSG = {
+    NO_KEY:      'Please enter your license key.',
+    INVALID_KEY: 'License key not found. Check the key and try again.',
+    REVOKED:     'This license has been revoked. Contact your administrator.',
+    EXPIRED:     'This license has expired. Contact your administrator to renew.',
+    OFFLINE:     'Cannot reach the license server. Check your internet connection.',
+    PERMISSION:  'License server access denied. Contact support.',
+    ERROR:       'An error occurred verifying your license. Try again.',
+  };
+
+  const formatKey = v => {
+    const raw = v.replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+    const parts = [];
+    for (let i = 0; i < raw.length && parts.join('').length < 16; i += 4)
+      parts.push(raw.slice(i, i+4));
+    return parts.join('-');
+  };
+
+  const handleInput = e => setKeyInput(formatKey(e.target.value));
+
+  const handleActivate = async () => {
+    setStatus('checking'); setErrMsg('');
+    const result = await validateAdminLicense(keyInput);
+    if (result.valid) {
+      // persist so admin doesn't re-enter every session
+      try { localStorage.setItem('adminLicenseKey', keyInput.trim().toUpperCase()); } catch(_) {}
+      setStatus('idle');
+      onValidated();
+    } else {
+      setStatus('error');
+      setErrMsg(REASON_MSG[result.reason] || REASON_MSG.ERROR);
+    }
+  };
+
+  const bg   = dk ? '#111827' : '#f0f4ff';
+  const surf = dk ? '#1e2535' : '#ffffff';
+  const bord = dk ? '#2d3650' : '#c0ccee';
+  const tx   = dk ? '#e8edf8' : '#1a2040';
+  const tx2  = dk ? '#8898c0' : '#4a5880';
+  const tx3  = dk ? '#5a6a90' : '#8090b8';
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:9999,background:`radial-gradient(ellipse at 30% 20%, ${dk?'#1a2a4a':'#dde8ff'} 0%, ${bg} 60%)`,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{background:surf,border:`1px solid ${bord}`,borderRadius:20,padding:'48px 52px',width:460,maxWidth:'96vw',boxShadow:'0 32px 80px rgba(0,0,0,0.3)',position:'relative',overflow:'hidden'}}>
+        {/* glow accent */}
+        <div style={{position:'absolute',top:-60,right:-60,width:200,height:200,background:'radial-gradient(circle,rgba(99,102,241,0.15) 0%,transparent 70%)',borderRadius:'50%',pointerEvents:'none'}} />
+
+        {/* Logo */}
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:32}}>
+          <div style={{width:48,height:48,borderRadius:12,background:'linear-gradient(135deg,#6366f1,#a78bfa)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:800,color:'#fff',letterSpacing:-1}}>LC</div>
+          <div>
+            <div style={{fontSize:18,fontWeight:700,color:tx,lineHeight:1}}>Legal Compliance</div>
+            <div style={{fontSize:10,color:tx3,letterSpacing:2,textTransform:'uppercase',marginTop:3}}>Measurement System</div>
+          </div>
+        </div>
+
+        <div style={{fontSize:15,fontWeight:600,color:tx2,marginBottom:6}}>Administrator License Required</div>
+        <div style={{fontSize:12,color:tx3,marginBottom:24,lineHeight:1.6}}>Enter your license key to access the Admin dashboard. Contact your software provider if you don't have one.</div>
+
+        <div style={{fontSize:11,color:tx3,marginBottom:16,display:'flex',alignItems:'center',gap:6}}>
+          Format: <code style={{background:dk?'rgba(99,102,241,.15)':'rgba(99,102,241,.1)',color:'#6366f1',padding:'2px 7px',borderRadius:4,fontFamily:'monospace',fontSize:10,letterSpacing:1}}>XXXX-XXXX-XXXX-XXXX</code>
+        </div>
+
+        <input
+          value={keyInput}
+          onChange={handleInput}
+          onKeyDown={e => e.key==='Enter' && handleActivate()}
+          maxLength={19}
+          placeholder="XXXX-XXXX-XXXX-XXXX"
+          style={{width:'100%',padding:'13px 16px',background:dk?'rgba(30,37,53,0.8)':'#f0f4ff',border:`1.5px solid ${status==='error'?'#ef4444':bord}`,color:tx,borderRadius:10,fontFamily:'monospace',fontSize:15,letterSpacing:2,textTransform:'uppercase',boxSizing:'border-box',marginBottom:10,outline:'none',transition:'border-color .2s'}}
+        />
+
+        {status === 'error' && (
+          <div style={{padding:'9px 13px',borderRadius:8,background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.25)',color:'#fca5a5',fontSize:12,marginBottom:12,display:'flex',alignItems:'center',gap:8}}>
+            ⚠ {errMsg}
+          </div>
+        )}
+
+        <button
+          onClick={handleActivate}
+          disabled={status==='checking'}
+          style={{width:'100%',padding:13,border:'none',borderRadius:10,background:'linear-gradient(135deg,#6366f1,#7c3aed)',color:'#fff',fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:700,cursor:status==='checking'?'not-allowed':'pointer',opacity:status==='checking'?0.6:1,marginTop:4,display:'flex',alignItems:'center',justifyContent:'center',gap:8,transition:'all .2s'}}
+        >
+          {status==='checking' ? (
+            <><span style={{width:16,height:16,border:'2px solid rgba(255,255,255,.3)',borderTopColor:'#fff',borderRadius:'50%',display:'inline-block',animation:'lc-spin .7s linear infinite'}} /> Verifying…</>
+          ) : '🔑 Activate License'}
+        </button>
+
+        <div style={{marginTop:22,textAlign:'center',fontSize:10,color:tx3,lineHeight:1.8}}>
+          <strong style={{color:tx2}}>Offline use is not supported.</strong><br/>
+          An active internet connection is required to validate your license.
+        </div>
+
+        <style>{`@keyframes lc-spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    ROOT APP  (Firebase-synced)
 ═══════════════════════════════════════════ */
 function App() {
@@ -5671,8 +5812,9 @@ function App() {
   const [categories,   setCategories]   = useState(() => {
     try { const s=localStorage.getItem('categories'); return s?JSON.parse(s):DEFAULT_CATEGORIES; } catch(_){ return DEFAULT_CATEGORIES; }
   });
-  const [ready,        setReady]        = useState(false);
-  const [syncStatus,   setSyncStatus]   = useState('idle'); // 'idle'|'syncing'|'synced'|'error'
+  const [ready,            setReady]            = useState(false);
+  const [syncStatus,       setSyncStatus]       = useState('idle'); // 'idle'|'syncing'|'synced'|'error'
+  const [licenseValidated, setLicenseValidated] = useState(false); // true once admin license is confirmed
 
   /* ── 1. Boot: load from Firebase, block login screen until users are loaded ── */
   useEffect(() => {
@@ -5682,6 +5824,16 @@ function App() {
         if (t) setTheme(t.value);
         const ck = storage.get('colourKey');
         if (ck && COLOUR_THEMES[ck.value]) { setColourKey(ck.value); applyThemeCSSVars(ck.value); }
+      } catch(_) {}
+
+      // Check if a previously-validated admin license key exists in localStorage
+      try {
+        const cachedKey = localStorage.getItem('adminLicenseKey');
+        if (cachedKey) {
+          const result = await validateAdminLicense(cachedKey);
+          if (result.valid) setLicenseValidated(true);
+          else localStorage.removeItem('adminLicenseKey'); // expired/revoked — clear it
+        }
       } catch(_) {}
 
       setSyncStatus('syncing');
@@ -5863,7 +6015,12 @@ function App() {
     if (u) { setCurrentUser(u); setPage(u.role); return true; }
     return false;
   };
-  const logout = () => { setCurrentUser(null); setPage('login'); };
+  const logout = () => {
+    setCurrentUser(null);
+    setPage('login');
+    setLicenseValidated(false);
+    try { localStorage.removeItem('adminLicenseKey'); } catch(_) {}
+  };
 
   const dk = theme === 'dark';
 
@@ -5889,7 +6046,12 @@ function App() {
                 updatePlants, updateUsers, updateRequirements, logout, syncStatus, categories, updateCategories };
 
   if (page==='login')          return <LoginPage login={login} dk={dk} toggleTheme={toggleTheme} colourKey={colourKey} changeColour={changeColour} />;
-  if (page==='admin')          return <AdminDashboard {...ctx} />;
+  if (page==='admin') {
+    // Developer account bypasses the license gate entirely
+    if (!currentUser?._isDev && !licenseValidated)
+      return <LicenseGate dk={dk} onValidated={() => setLicenseValidated(true)} />;
+    return <AdminDashboard {...ctx} />;
+  }
   if (page==='top_management') return <TopManagementDashboard {...ctx} />;
   if (page==='plant_head')     return <PlantHeadDashboard {...ctx} />;
   return <UserDashboard {...ctx} />;
