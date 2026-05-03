@@ -5769,7 +5769,7 @@ function LicenseGate({ dk, onValidated }) {
       // persist so admin doesn't re-enter every session
       try { localStorage.setItem('adminLicenseKey', keyInput.trim().toUpperCase()); } catch(_) {}
       setStatus('idle');
-      onValidated();
+      onValidated(keyInput.trim().toUpperCase());
     } else {
       setStatus('error');
       setErrMsg(getErrMsg(result));
@@ -6058,7 +6058,24 @@ function App() {
       if (freshUsers && freshUsers.length > 0) {
         setUsers(freshUsers); // keep React state fresh
         const u = freshUsers.find(x => x.email.toLowerCase() === emailL && x.password === password);
-        if (u) { setCurrentUser(u); setPage(u.role); return true; }
+        if (u) {
+          setCurrentUser(u);
+          setPage(u.role);
+          // Cross-device license check: if admin, look for saved license key in their Firestore record
+          if (u.role === 'admin' && !licenseValidated) {
+            try {
+              const savedKey = u.validatedLicenseKey;
+              if (savedKey) {
+                const result = await validateAdminLicense(savedKey);
+                if (result.valid) {
+                  setLicenseValidated(true);
+                  try { localStorage.setItem('adminLicenseKey', savedKey); } catch(_) {}
+                }
+              }
+            } catch(_) {}
+          }
+          return true;
+        }
         // Firebase returned users but no match → definitely wrong credentials
         return false;
       }
@@ -6105,7 +6122,17 @@ function App() {
   if (page==='admin') {
     // Developer account bypasses the license gate entirely
     if (!currentUser?._isDev && !licenseValidated)
-      return <LicenseGate dk={dk} onValidated={() => setLicenseValidated(true)} />;
+      return <LicenseGate dk={dk} onValidated={(key) => {
+        setLicenseValidated(true);
+        // Persist validated key to this user's Firestore doc so other devices skip the gate
+        if (key && currentUser?.id) {
+          try {
+            window.db.collection('legalcomp_users').doc(currentUser.id)
+              .update({ validatedLicenseKey: key.trim().toUpperCase() })
+              .catch(()=>{});
+          } catch(_) {}
+        }
+      }} />;
     return <AdminDashboard {...ctx} />;
   }
   if (page==='top_management') return <TopManagementDashboard {...ctx} />;
