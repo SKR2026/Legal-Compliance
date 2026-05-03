@@ -5665,9 +5665,30 @@ function fbListen(col, cb) {
 async function validateAdminLicense(key) {
   if (!key || !key.trim()) return { valid: false, reason: 'NO_KEY' };
   const cleanKey = key.trim().toUpperCase();
+
+  // ── Step 1: Guarantee anonymous auth with retries ──────────────────────
+  // fbEnsureAuth() silently swallows errors; here we retry up to 3 times
+  // and only proceed once we actually have a currentUser token.
+  let authReady = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (!window.fbAuth.currentUser) {
+        await window.fbAuth.signInAnonymously();
+      }
+      if (window.fbAuth.currentUser) { authReady = true; break; }
+    } catch(authErr) {
+      console.warn('License auth attempt', attempt + 1, 'failed:', authErr.code, authErr.message);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 600));
+    }
+  }
+  if (!authReady) {
+    // Auth truly failed — try the Firestore read anyway in case rules are open,
+    // but surface a clear error if it also fails.
+    console.warn('Could not obtain anonymous auth token — attempting Firestore read anyway.');
+  }
+
+  // ── Step 2: Read the license document ─────────────────────────────────
   try {
-    // Ensure anonymous auth so Firestore rules (request.auth != null) pass
-    await fbEnsureAuth();
     const snap = await window.db.collection('licenses').doc(cleanKey).get();
     if (!snap.exists) return { valid: false, reason: 'INVALID_KEY' };
     const d = snap.data();
@@ -5688,10 +5709,11 @@ async function validateAdminLicense(key) {
     }); } catch(_) {}
     return { valid: true, data: d };
   } catch(e) {
+    console.error('License Firestore error:', e.code, e.message);
     if (e.code === 'unavailable' || (e.message && e.message.includes('offline')))
       return { valid: false, reason: 'OFFLINE' };
     if (e.code === 'permission-denied')
-      return { valid: false, reason: 'PERMISSION' };
+      return { valid: false, reason: 'PERMISSION', detail: e.message };
     return { valid: false, reason: 'ERROR', message: e.message };
   }
 }
@@ -5707,9 +5729,14 @@ function LicenseGate({ dk, onValidated }) {
     REVOKED:     'This license has been revoked. Contact your administrator.',
     EXPIRED:     'This license has expired. Contact your administrator to renew.',
     OFFLINE:     'Cannot reach the license server. Check your internet connection.',
-    PERMISSION:  'Firebase anonymous auth is disabled. Enable it in Firebase Console → Authentication → Sign-in providers → Anonymous.',
+    PERMISSION:  'Firestore access denied. Check Firestore rules allow authenticated reads on the licenses collection.',
     ERROR:       'An error occurred verifying your license. Try again.',
   };
+
+  const getErrMsg = result =>
+    result.reason === 'PERMISSION' && result.detail
+      ? `Access denied: ${result.detail}`
+      : REASON_MSG[result.reason] || REASON_MSG.ERROR;
 
   const formatKey = v => {
     const raw = v.replace(/[^A-Za-z0-9]/g,"").toUpperCase();
@@ -5736,7 +5763,7 @@ function LicenseGate({ dk, onValidated }) {
       onValidated();
     } else {
       setStatus('error');
-      setErrMsg(REASON_MSG[result.reason] || REASON_MSG.ERROR);
+      setErrMsg(getErrMsg(result));
     }
   };
 
@@ -5779,8 +5806,18 @@ function LicenseGate({ dk, onValidated }) {
         />
 
         {status === 'error' && (
-          <div style={{padding:'9px 13px',borderRadius:8,background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.25)',color:'#fca5a5',fontSize:12,marginBottom:12,display:'flex',alignItems:'center',gap:8}}>
-            ⚠ {errMsg}
+          <div style={{padding:'9px 13px',borderRadius:8,background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.25)',color:'#fca5a5',fontSize:12,marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'flex-start',gap:8}}>⚠ {errMsg}</div>
+            {errMsg.toLowerCase().includes('access denied') && (
+              <div style={{marginTop:8,padding:'7px 10px',background:'rgba(0,0,0,.2)',borderRadius:6,fontSize:11,color:'#fcd34d',fontFamily:'monospace',whiteSpace:'pre-wrap',lineHeight:1.7}}>
+                {`Firestore rules needed for skr-task:
+
+match /licenses/{id} {
+  allow read: if request.auth != null;
+  allow write: if request.auth != null;
+}`}
+              </div>
+            )}
           </div>
         )}
 
